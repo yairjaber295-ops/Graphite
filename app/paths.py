@@ -19,10 +19,6 @@ PROJECTS_DIR = os.path.join(ROOT, 'projects')
 def _models_dir():
     # Движок Whisper (CTranslate2) не открывает файлы по пути с кириллицей — держим модели в латинском пути
     base = os.environ.get('LOCALAPPDATA') or ''
-    for folder in ['Graphite', 'Narezchik']:
-        path = os.path.join(base, folder, 'whisper-models')
-        if os.path.isdir(path) and path.isascii():
-            return path
     path = os.path.join(base, 'Graphite', 'whisper-models')
     return path if base and path.isascii() else r'C:\GraphiteModels'
 
@@ -40,9 +36,6 @@ def _work_dir():
     if cfg.get('work_dir'):
         os.makedirs(cfg['work_dir'], exist_ok=True)
         return cfg['work_dir']
-    legacy = r'D:\Нарэзкэ'
-    if os.path.isdir(legacy):
-        return legacy
     default_dir = os.path.join(os.path.expanduser('~'), 'Videos', 'Graphite')
     os.makedirs(default_dir, exist_ok=True)
     return default_dir
@@ -52,8 +45,8 @@ WORK_DIR = _work_dir()
 
 
 def _find_scripts_dir():
-    """Папка со скриптами (загрузчик в TikTok): из запускалки или поиском на рабочем столе."""
-    env = os.environ.get('GRAPHITE_SCRIPTS_DIR') or os.environ.get('NAREZKA_SCRIPTS_DIR', '')
+    """Папка со скриптами (загрузчик в TikTok): из переменной окружения или настроек."""
+    env = os.environ.get('GRAPHITE_SCRIPTS_DIR', '')
     if env and os.path.isdir(env):
         return env
     cfg = read_json(os.path.join(ROOT, 'settings.json'), {}) or {}

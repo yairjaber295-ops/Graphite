@@ -10,7 +10,7 @@ import socket
 
 from paths import read_json, write_json
 
-TLS_DIR = os.path.join(os.environ.get('LOCALAPPDATA') or os.path.expanduser('~'), 'Narezchik', 'tls')
+TLS_DIR = os.path.join(os.environ.get('LOCALAPPDATA') or os.path.expanduser('~'), 'Graphite', 'tls')
 CA_KEY, CA_CRT = os.path.join(TLS_DIR, 'ca.key'), os.path.join(TLS_DIR, 'ca.crt')
 SRV_KEY, SRV_CRT = os.path.join(TLS_DIR, 'server.key'), os.path.join(TLS_DIR, 'server.crt')
 SRV_META = os.path.join(TLS_DIR, 'server.json')

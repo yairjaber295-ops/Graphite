@@ -7,14 +7,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import server  # noqa: E402
 
-def _appdata():
-    base = os.environ.get('LOCALAPPDATA') or os.path.expanduser('~')
-    p = os.path.join(base, 'Graphite')
-    if not os.path.exists(p) and os.path.exists(os.path.join(base, 'Narezchik')):
-        return os.path.join(base, 'Narezchik')
-    return p
-
-APPDATA = _appdata()
+APPDATA = os.path.join(os.environ.get('LOCALAPPDATA') or os.path.expanduser('~'), 'Graphite')
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP_ID = 'Graphite.VideoEditor'  # то же значение стоит в ярлыках (tools/build_desktop.ps1)
 EXE = os.path.join(ROOT, 'Graphite.exe')

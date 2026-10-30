@@ -1,12 +1,11 @@
 # Сборка Android-приложения Graphite (.apk).
 # Запуск: правый клик → «Выполнить с помощью PowerShell» (или: powershell -ExecutionPolicy Bypass -File build_android.ps1)
 # Первый раз скачает Java 21 и Android SDK (~4 ГБ) и попросит ПРИНЯТЬ ЛИЦЕНЗИИ Android SDK — это нужно сделать самому (y + Enter).
-# Всё ставится в %LOCALAPPDATA%\Narezchik\android (инструменты Android не любят кириллицу в путях).
+# Всё ставится в %LOCALAPPDATA%\Graphite\android (инструменты Android не любят кириллицу в путях).
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $Root = Split-Path -Parent $PSScriptRoot
-$legacyA = Join-Path $env:LOCALAPPDATA 'Narezchik\android'
-$A = if (Test-Path $legacyA) { $legacyA } else { Join-Path $env:LOCALAPPDATA 'Graphite\android' }
+$A = Join-Path $env:LOCALAPPDATA 'Graphite\android'
 $JDK_URL = 'https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.12.1%2B1/OpenJDK21U-jdk_x64_windows_hotspot_21.0.12.1_1.zip'
 $SDK_URL = 'https://dl.google.com/android/repository/commandlinetools-win-16111833_latest.zip'
 New-Item -ItemType Directory -Force $A | Out-Null
