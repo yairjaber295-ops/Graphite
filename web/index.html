@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#0f1011">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Graphite">
+<title>Graphite</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/logo.svg" type="image/svg+xml">
+<link rel="alternate icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="stylesheet" href="css/app.css">
+<script type="importmap">
+{ "imports": { "mediabunny": "./vendor/mediabunny.min.mjs", "mediabunny-aac": "./vendor/mediabunny-aac-encoder.min.mjs" } }
+</script>
+</head>
+<body>
+
+<!-- Экран проектов -->
+<div id="home" class="home">
+  <div class="home-top">
+    <div class="brand"><img class="brand-logo" src="icons/logo.svg" alt=""><span>Graphite</span></div>
+    <div class="spacer"></div>
+    <button class="chip" id="btn-publish" hidden><span data-icon="upload"></span><span>Публикации</span></button>
+    <button class="chip" id="btn-phone" hidden><span data-icon="phone"></span><span id="phone-label">Комп</span></button>
+    <button class="icon-btn" id="btn-settings-home" title="Настройки"><span data-icon="settings"></span></button>
+  </div>
+  <div class="hero">
+    <div class="hero-text">
+      <h1>Видео за пару кликов</h1>
+      <p>Нарезки, эдиты под бит, истории, Shorts, YouTube и слайдшоу из фото. Субтитры, обложки, эффекты и биты делаются сами — по твоим пресетам.</p>
+    </div>
+    <button class="btn primary big" id="btn-new"><span data-icon="plus"></span> Новый проект</button>
+  </div>
+  <div id="mode-bar" class="mode-bar" hidden></div>
+  <div class="home-sec-title">Быстрый старт</div>
+  <div id="quick-start" class="quick-start"></div>
+  <div class="home-tools">
+    <div class="home-sec-title" id="home-count">Проекты</div>
+    <div class="spacer"></div>
+    <input id="home-search" class="home-search" type="search" placeholder="Поиск по проектам…" spellcheck="false">
+    <div id="home-sort"></div>
+  </div>
+  <div id="project-list" class="project-list"></div>
+</div>
+
+<!-- Редактор -->
+<div id="editor" class="editor" hidden>
+  <header class="topbar">
+    <button class="icon-btn" id="btn-home" title="К проектам"><span data-icon="back"></span></button>
+    <input id="project-name" class="name-input" spellcheck="false">
+    <span id="save-state" class="save-state"></span>
+    <div class="spacer"></div>
+    <div id="jobs" class="jobs"></div>
+    <button class="icon-btn desk" id="btn-undo" title="Отменить"><span data-icon="undo"></span></button>
+    <button class="icon-btn desk" id="btn-redo" title="Повторить"><span data-icon="redo"></span></button>
+    <button class="icon-btn desk" id="btn-keys" title="Горячие клавиши"><span data-icon="keyboard"></span></button>
+    <button class="icon-btn" id="btn-settings" title="Настройки и оформление"><span data-icon="palette"></span></button>
+    <button class="btn" id="btn-schedule" title="Запланировать в TikTok" hidden><span data-icon="upload"></span><span class="lbl">Запланировать</span></button>
+    <button class="btn primary" id="btn-export"><span data-icon="export"></span><span class="lbl">Экспорт</span></button>
+  </header>
+
+  <div class="main">
+    <nav class="tabs" id="tabs">
+      <button data-tab="media" class="active"><span data-icon="film"></span><b>Медиа</b></button>
+      <button data-tab="audio"><span data-icon="music"></span><b>Аудио</b></button>
+      <button data-tab="text"><span data-icon="type"></span><b>Текст</b></button>
+      <button data-tab="subs"><span data-icon="subs"></span><b>Субтитры</b></button>
+      <button data-tab="effects"><span data-icon="sparkles"></span><b>Эффекты</b></button>
+      <button data-tab="transitions"><span data-icon="transition"></span><b>Переходы</b></button>
+      <button data-tab="auto"><span data-icon="wand"></span><b>Авто</b></button>
+      <button data-tab="canvas"><span data-icon="canvas"></span><b>Холст</b></button>
+    </nav>
+    <section class="panel sheet" id="panel"></section>
+
+    <section class="viewer">
+      <div class="stage" id="stage">
+        <div class="frame-wrap">
+          <canvas id="preview"></canvas>
+          <canvas id="preview-ui"></canvas>
+        </div>
+        <div class="stage-empty" id="stage-empty">
+          <img src="icons/logo.svg" alt="" class="stage-logo">
+          <b>Начнём с видео</b>
+          <div>Видео, фото или звук — с компа или телефона</div>
+          <button class="btn primary" id="btn-import-empty"><span data-icon="plus"></span> Импорт файлов</button>
+          <div class="dim small">или просто перетащи файлы сюда</div>
+        </div>
+      </div>
+      <div class="transport">
+        <span class="tc" id="tc-cur">00:00.00</span>
+        <span class="tc dim" id="tc-dur">00:00.00</span>
+        <div class="spacer"></div>
+        <button class="icon-btn" id="btn-prev" title="К началу части"><span data-icon="prev"></span></button>
+        <button class="play-btn" id="btn-play" title="Пуск / пауза"><span data-icon="play" class="i-play"></span><span data-icon="pause" class="i-pause"></span></button>
+        <button class="icon-btn" id="btn-next" title="К следующей части"><span data-icon="next"></span></button>
+        <div class="spacer"></div>
+        <span class="tc dim" id="part-indicator"></span>
+        <button class="icon-btn mob" id="btn-undo-m"><span data-icon="undo"></span></button>
+        <button class="icon-btn mob" id="btn-redo-m"><span data-icon="redo"></span></button>
+      </div>
+    </section>
+
+    <aside class="inspector sheet" id="inspector"></aside>
+  </div>
+
+  <div class="resizer" id="resizer"></div>
+  <section class="timeline" id="timeline-wrap">
+    <div class="tl-toolbar">
+      <button class="tool" id="tl-split" title="Разрезать"><span data-icon="split"></span><b>Разрезать</b></button>
+      <button class="tool" id="tl-trim-l" title="Обрезать слева до курсора"><span data-icon="trimL"></span></button>
+      <button class="tool" id="tl-trim-r" title="Обрезать справа до курсора"><span data-icon="trimR"></span></button>
+      <button class="tool" id="tl-delete" title="Удалить"><span data-icon="trash"></span><b>Удалить</b></button>
+      <button class="tool" id="tl-dup" title="Дублировать"><span data-icon="copy"></span></button>
+      <button class="tool" id="tl-addcut" title="Граница части"><span data-icon="flag"></span><b>Часть</b></button>
+      <div class="spacer"></div>
+      <label class="toggle" title="Удаление и обрезка видео сдвигает субтитры, тексты и эффекты"><input type="checkbox" id="tl-ripple" checked><span>Сдвиг</span></label>
+      <label class="toggle" title="Прилипание к курсору, краям и битам"><input type="checkbox" id="tl-snap" checked><span>Магнит</span></label>
+      <span data-icon="zoom" class="dim desk"></span>
+      <input type="range" id="tl-zoom" min="0" max="100" value="40" class="desk">
+    </div>
+    <div class="tl-body" id="tl-body"><canvas id="tl"></canvas></div>
+  </section>
+
+  <!-- нижняя панель на телефоне -->
+  <nav class="mobile-bar" id="mobile-bar"></nav>
+</div>
+
+<div id="sheet-back" class="sheet-back"></div>
+<div id="modal-root"></div>
+<div id="toasts" class="toasts"></div>
+<div id="videos" hidden></div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs>
+<linearGradient id="g0" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a3a6ad"/><stop offset="1" stop-color="#6d7077"/></linearGradient>
+<linearGradient id="g1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffb061"/><stop offset="1" stop-color="#ff7a1a"/></linearGradient>
+<linearGradient id="g2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e8640f"/><stop offset="1" stop-color="#9c3c08"/></linearGradient>
+<linearGradient id="g3" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2a2c30"/><stop offset="1" stop-color="#17181b"/></linearGradient>
+<linearGradient id="g4" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3d3f44"/><stop offset="1" stop-color="#26282c"/></linearGradient>
+<linearGradient id="g5" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5c5e64"/><stop offset="1" stop-color="#3b3d42"/></linearGradient>
+</defs>
+<polygon points="22.72,34.65 50.00,18.90 50.00,50.40" fill="url(#g0)"/>
+<polygon points="50.00,18.90 77.28,34.65 50.00,50.40" fill="url(#g1)"/>
+<polygon points="50.00,50.40 77.28,34.65 77.28,66.15" fill="url(#g2)"/>
+<polygon points="50.00,50.40 77.28,66.15 50.00,81.90" fill="url(#g3)"/>
+<polygon points="22.72,66.15 50.00,50.40 50.00,81.90" fill="url(#g4)"/>
+<polygon points="22.72,34.65 50.00,50.40 22.72,66.15" fill="url(#g5)"/>
+<polyline points="22.72,34.65 50.00,18.90 77.28,34.65" fill="none" stroke="#fff" stroke-opacity=".28" stroke-width="1" stroke-linejoin="round"/>
+</svg>
