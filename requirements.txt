@@ -1,8 +1,14 @@
 # Core GUI window
-pywebview>=5.0.0
+pywebview>=6.2
 
 # Numerical operations and audio waveforms
 numpy>=1.24.0
+
+# Images: photos, posters, enhance (Real-ESRGAN)
+pillow>=10.0
+
+# Certificates for the phone connection (HTTPS)
+cryptography>=42.0
 
 # Automatic speech-to-text subtitling
 faster-whisper>=1.0.0

@@ -7,7 +7,7 @@ export class ServerBackend {
     this.base = base.replace(/\/$/, '');
     this.key = key;
     this.kind = base ? 'remote' : 'pc';
-    this.caps = { transcribe: true, proxies: true, saveToDisk: true, uploader: !base, openFolder: !base, pickPaths: !base };
+    this.caps = { transcribe: true, proxies: true, saveToDisk: true, uploader: !base, openFolder: !base, pickPaths: !base, enhance: true };
   }
 
   url(path) {
@@ -84,8 +84,22 @@ export class ServerBackend {
   /** Для плеера: лёгкая копия, если готова, иначе оригинал. */
   playUrl(pid, m, st) {
     if (m.kind === 'audio') return this.url(`/source/${pid}/${m.id}`);
-    return st?.meta?.proxy ? this.url(`/files/${pid}/media/${m.id}/proxy.mp4`) : this.url(`/source/${pid}/${m.id}`);
+    const v = m.enhanced ? `?v=${Math.round(m.enhanced.at || 1)}` : '';
+    if (!st?.meta?.proxy) return this.url(`/source/${pid}/${m.id}${v}`);
+    return this.url(`/files/${pid}/media/${m.id}/${st.meta.proxy_name || 'proxy.mp4'}${v}`);
   }
+
+  // --- улучшение качества (Real-ESRGAN на компе): файл подменяется под тем же id медиа
+  async enhancePreview(pid, m, t, opts) {
+    const r = await this.req('POST', '/api/enhance/preview', { pid, mid: m.id, t, opts });
+    return { ...r, before: this.url(r.before), after: this.url(r.after) };
+  }
+  async enhance(pid, m, opts, onProgress, onJob) {
+    const job = await this.req('POST', '/api/enhance', { pid, mid: m.id, opts });
+    onJob?.(job.id);
+    return (await this.waitJob(job.id, onProgress)).result;   // { width, height, enhanced }
+  }
+  unenhance(pid, m) { return this.req('POST', '/api/enhance/revert', { pid, mid: m.id }); }
 
   /** Для экспорта — всегда оригинал. */
   exportSource(pid, m) {
@@ -96,11 +110,10 @@ export class ServerBackend {
 
   async mediaUrl(pid, m) {
     const mid = typeof m === 'string' ? m : (m?.id || m);
-    return this.url(`/source/${pid}/${mid}`);
+    return this.url(`/source/${pid}/${mid}${m?.enhanced ? `?v=${Math.round(m.enhanced.at || 1)}` : ''}`);
   }
   async imageBitmap(pid, m) {
-    const mid = typeof m === 'string' ? m : (m?.id || m);
-    const res = await fetch(this.url(`/source/${pid}/${mid}`));
+    const res = await fetch(await this.mediaUrl(pid, m), { cache: 'no-store' });
     return createImageBitmap(await res.blob());
   }
 

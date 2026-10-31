@@ -15,14 +15,36 @@ _model_key = None
 
 
 def _add_cuda_dlls():
-    """Библиотеки CUDA из pip-пакетов nvidia-* нужно явно показать Windows."""
-    base = os.path.join(sys.prefix, 'Lib', 'site-packages', 'nvidia')
-    for d in glob.glob(os.path.join(base, '*', 'bin')):
+    """Библиотеки CUDA (pip-пакеты nvidia-* или установленный CUDA Toolkit) нужно явно показать Windows."""
+    dirs = glob.glob(os.path.join(sys.prefix, 'Lib', 'site-packages', 'nvidia', '*', 'bin'))
+    if os.environ.get('CUDA_PATH'):
+        dirs.append(os.path.join(os.environ['CUDA_PATH'], 'bin'))
+    dirs += sorted(glob.glob(os.path.join(os.environ.get('ProgramFiles', r'C:\Program Files'), 'NVIDIA GPU Computing Toolkit', 'CUDA', 'v12*', 'bin')))
+    dirs += glob.glob(os.path.join(os.environ.get('ProgramFiles', r'C:\Program Files'), 'NVIDIA', 'CUDNN', 'v9*', 'bin', '12*'))
+    for d in dirs:
+        if not os.path.isdir(d):
+            continue
         try:
             os.add_dll_directory(d)
         except Exception:
             pass
         os.environ['PATH'] = d + os.pathsep + os.environ.get('PATH', '')
+
+
+def _cuda_ok():
+    """Есть ли на этом компе библиотеки CUDA для Whisper (у собранной программы их нет внутри — они весят больше гигабайта)."""
+    import ctypes
+    for dll in ('cublas64_12.dll', 'cudnn64_9.dll'):
+        try:
+            ctypes.WinDLL(dll)
+        except OSError:
+            print(f'Whisper: нет {dll} — распознаю на процессоре')
+            return False
+    return True
+
+
+def _is_cuda_error(e):
+    return bool(re.search(r'cublas|cudnn|cuda|CUBLAS|CUDNN', str(e)))
 
 
 MODEL_SIZES_MB = {'large-v3-turbo': 1545, 'medium': 1460, 'small': 465}
@@ -74,14 +96,15 @@ def _model_path(model_name, job):
         stop.set()
 
 
-def _load(model_name, job):
+def _load(model_name, job, force_cpu=False):
     global _model, _model_key
     _add_cuda_dlls()
     from faster_whisper import WhisperModel
-    if _model is not None and _model_key and _model_key[0] == model_name:
+    if _model is not None and _model_key and _model_key[0] == model_name and not (force_cpu and _model_key[1] == 'cuda'):
         return _model, _model_key[1]
     model_path = _model_path(model_name, job)
-    for device, compute in (('cuda', 'float16'), ('cpu', 'int8')):
+    devices = (('cuda', 'float16'), ('cpu', 'int8')) if (not force_cpu and _cuda_ok()) else (('cpu', 'int8'),)
+    for device, compute in devices:
         key = (model_name, device)
         try:
             job.update(message=f'Загрузка модели {model_name} ({"видеокарта" if device == "cuda" else "процессор — будет медленно"})...')
@@ -129,6 +152,18 @@ def transcribe(job, path, duration, language='ru', model_name=DEFAULT_MODEL, aud
         audio = _decode_audio(path)
     duration = duration or len(audio) / 16000
     job.update(0.04, 'Распознаю речь...')
+    try:
+        return _run(job, model, device, audio, duration, language, model_name)
+    except Exception as e:
+        if device != 'cuda' or not _is_cuda_error(e):
+            raise
+        # видеокарта есть, но CUDA-библиотеки не те/не все — пробуем на процессоре
+        print('Whisper на видеокарте упал, перехожу на процессор:', e)
+        model, device = _load(model_name, job, force_cpu=True)
+        return _run(job, model, device, audio, duration, language, model_name)
+
+
+def _run(job, model, device, audio, duration, language, model_name):
     segments, info = model.transcribe(
         audio, language=None if language == 'auto' else language, word_timestamps=True,
         vad_filter=True, vad_parameters={'min_silence_duration_ms': 300}, beam_size=5,

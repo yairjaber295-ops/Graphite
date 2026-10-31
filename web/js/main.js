@@ -625,6 +625,14 @@ async function init() {
   if (k) { saveSettings({ pcKey: k, mode: 'pc' }); history.replaceState(null, '', location.pathname); }
   S.backend = await initBackend();
   S.backend.onUrl = () => draw();
+  // телефон: готова лёгкая копия видео — плеер переключится на неё сам
+  S.backend.onMeta = (mid, patch) => {
+    const st = S.media[mid];
+    if (st) st.meta = { ...st.meta, ...patch };
+    const m = S.project?.media.find((x) => x.id === mid);
+    if (patch.proxy && m) emit('toast', { text: `«${m.name}»: лёгкая копия готова — перемотка и превью станут плавнее`, kind: 'ok' });
+    draw();
+  };
   // телефон, связанный с компом: один раз за запуск отправляем возможности устройства (для разбора проблем)
   if (!env.desktopApp && (S.backend.kind === 'remote' || S.backend.pc)) setTimeout(() => sendReport(true).catch(() => {}), 8000);
   S.fonts = await fetch('fonts/fonts.json').then((r) => r.json());

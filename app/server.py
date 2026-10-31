@@ -29,13 +29,13 @@ import fonts  # noqa: E402
 import jobs  # noqa: E402
 import media  # noqa: E402
 import tls  # noqa: E402
-from paths import (FONTS_DIR, PROJECTS_DIR, ROOT, SCRIPTS_DIR, WEB_DIR, WORK_DIR, project_dir,  # noqa: E402
+from paths import (FONTS_DIR, PROJECTS_DIR, RES_DIR, ROOT, SCRIPTS_DIR, WEB_DIR, WORK_DIR, project_dir,  # noqa: E402
                    read_json, sanitize_filename, write_json)
 
 VERSION = '2.0'
 HTTP_PORT, HTTPS_PORT = 8765, 8443
 SETTINGS = os.path.join(ROOT, 'settings.json')
-APK_PATH = os.path.join(ROOT, 'dist', 'Graphite.apk')
+APK_PATH = os.path.join(RES_DIR, 'dist', 'Graphite.apk')
 _dialog_lock = threading.Lock()
 for ext, t in (('.js', 'application/javascript'), ('.mjs', 'application/javascript'), ('.ttf', 'font/ttf'),
                ('.webmanifest', 'application/manifest+json'), ('.wasm', 'application/wasm'), ('.crt', 'application/x-x509-ca-cert'),
@@ -271,6 +271,107 @@ def prepare_media_job(job, pid, mid):
     meta['status'] = 'ready'
     write_json(os.path.join(d, 'meta.json'), meta)
     return {'mid': mid}
+
+
+# ----------------------------------------------------------------------------
+#   Улучшение качества (Real-ESRGAN). Улучшенный файл подменяет исходник под тем же id —
+#   куски, стоп-кадры, субтитры остаются как были; «Вернуть оригинал» переключает обратно.
+# ----------------------------------------------------------------------------
+ENH_TMP = os.path.join(ROOT, '_enhance_tmp')   # файлы, присланные телефоном (проекты на телефоне)
+
+
+def enhance_run(job, src, out_dir, opts):
+    """Общая часть: файл → улучшенный файл в out_dir. Возвращает (путь, сведения об исходнике, размер)."""
+    import enhance
+    info = media.probe(src)
+    model, res = opts.get('model', 'fast'), opts.get('res', '1080')
+    if model not in enhance.MODELS or res not in enhance.RES:
+        raise ValueError('неизвестная настройка')
+    ext = '.png' if info['kind'] == 'image' else '.mp4'
+    dst = os.path.join(out_dir, f'enhanced_{model}_{res}{ext}')
+    tmp = dst + '.part' + ext
+    job.update(0, 'Жду видеокарту…')
+    with jobs.gpu_lock:
+        job.update(0, 'Запуск нейросети…')
+        if info['kind'] == 'image':
+            size = enhance.enhance_image(job, src, tmp, opts)
+        else:
+            size = enhance.enhance_video(job, src, tmp, info, opts)
+    os.replace(tmp, dst)
+    return dst, info, size
+
+
+def enhance_media_job(job, pid, mid, opts):
+    d = media_dir(pid, mid)
+    meta = media_meta(pid, mid)
+    src = meta.get('original') or meta['path']
+    old = meta.get('path') if meta.get('original') else None
+    dst, info, (w, h) = enhance_run(job, src, d, opts)
+    if old and old != dst and os.path.dirname(old) == d:
+        try:
+            os.remove(old)
+        except OSError:
+            pass
+    if info['kind'] == 'video':
+        job.update(0.99, 'Лёгкая копия для предпросмотра…')
+        tmp = os.path.join(d, 'proxy_enh_tmp.mp4')
+        media.make_proxy(job, dst, tmp, info['duration'], 0.99, 1.0)
+        os.replace(tmp, os.path.join(d, 'proxy_enh.mp4'))
+        meta['proxy_name'] = 'proxy_enh.mp4'
+    enh = {'model': opts.get('model'), 'res': opts.get('res'), 'power': opts.get('power'), 'from': [info['width'], info['height']],
+           'at': time.time()}
+    meta.update(original=src, path=dst, width=w, height=h, enhanced=enh)
+    write_json(os.path.join(d, 'meta.json'), meta)
+    return {'mid': mid, 'width': w, 'height': h, 'enhanced': enh}
+
+
+def enhance_revert(pid, mid):
+    d = media_dir(pid, mid)
+    meta = media_meta(pid, mid)
+    if not meta.get('original'):
+        return {'mid': mid, 'width': meta.get('width'), 'height': meta.get('height')}
+    cur = meta['path']
+    info = media.probe(meta['original'])
+    meta.update(path=meta.pop('original'), width=info['width'], height=info['height'])
+    meta.pop('enhanced', None)
+    meta.pop('proxy_name', None)
+    write_json(os.path.join(d, 'meta.json'), meta)
+    for f in (cur, os.path.join(d, 'proxy_enh.mp4')):
+        if os.path.dirname(f) == d:
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+    return {'mid': mid, 'width': info['width'], 'height': info['height']}
+
+
+def xfile_dir(fid):
+    if not re.fullmatch(r'[0-9a-f]{12}', fid or ''):
+        raise ValueError('bad file id')
+    return os.path.join(ENH_TMP, fid)
+
+
+def xfile_src(fid):
+    d = xfile_dir(fid)
+    names = [f for f in os.listdir(d) if f.startswith('src.')]
+    if not names:
+        raise ValueError('файл не найден — отправьте заново')
+    return os.path.join(d, names[0])
+
+
+def enhance_file_job(job, fid, opts):
+    dst, info, (w, h) = enhance_run(job, xfile_src(fid), xfile_dir(fid), opts)
+    return {'fid': fid, 'file': os.path.basename(dst), 'width': w, 'height': h, 'kind': info['kind']}
+
+
+def enhance_preview(src, t, opts, out_dir, url_base):
+    import enhance
+    info = media.probe(src)
+    with jobs.gpu_lock:
+        r = enhance.preview(src, info, t, opts, out_dir)
+    r['before'] = url_base + r['before']
+    r['after'] = url_base + r['after']
+    return r
 
 
 def transcribe_job(job, pid, mid, lang, model):
@@ -625,6 +726,9 @@ class Handler(BaseHTTPRequestHandler):
                                    'https_port': HTTPS_PORT, 'apk': os.path.isfile(APK_PATH), 'name': socket.gethostname()})
         if p == ['jobs']:
             return self.send_json(jobs.list_for(q.get('pid', [None])[0]))
+        if p[0] == 'xfile' and len(p) >= 3:
+            # результат улучшения или кадры предпросмотра для телефона
+            return self.send_file(safe_join(xfile_dir(p[1]), p[2:]))
         if p[0] == 'job' and len(p) == 2:
             j = jobs.get(p[1])
             return self.send_json(j.to_dict()) if j else self.send_error_json(404, 'нет задачи')
@@ -633,7 +737,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_error_json(404, 'not found')
             data = read_json(os.path.join(media_dir(p[1], p[2]), f'{p[3]}.json'))
             if data and p[3] == 'meta':
-                data = {k: v for k, v in data.items() if k != 'path'} if not self.local else data
+                data = {k: v for k, v in data.items() if k not in ('path', 'original')} if not self.local else data
             return self.send_json(data)
         self.send_error_json(404, 'not found')
 
@@ -689,6 +793,27 @@ class Handler(BaseHTTPRequestHandler):
             with open(os.path.join(d, name), 'ab') as f:
                 f.write(data.rstrip(b'\n') + b'\n')
             return self.send_json({'ok': True})
+        if p == ['xfile']:
+            # видео/фото с телефона (проект на телефоне) — для улучшения качества на этом компе
+            now = time.time()
+            if os.path.isdir(ENH_TMP):
+                for old in os.listdir(ENH_TMP):
+                    if now - os.path.getmtime(os.path.join(ENH_TMP, old)) > 86400:
+                        shutil.rmtree(os.path.join(ENH_TMP, old), ignore_errors=True)
+            fid = uuid.uuid4().hex[:12]
+            d = xfile_dir(fid)
+            os.makedirs(d)
+            ext = os.path.splitext(sanitize_filename(q.get('name', ['f.mp4'])[0]))[1].lower() or '.mp4'
+            path = os.path.join(d, 'src' + ext)
+            with open(path, 'wb') as f:
+                left = int(self.headers.get('Content-Length') or 0)
+                while left > 0:
+                    chunk = self.rfile.read(min(1 << 20, left))
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    left -= len(chunk)
+            return self.send_json({'fid': fid, **media.probe(path)})
         if p == ['transcribe_pcm']:
             pcm = self.read_raw()
             j = jobs.start('transcribe', None, 'Распознавание речи (с телефона)', transcribe_pcm_job, pcm,
@@ -737,6 +862,31 @@ class Handler(BaseHTTPRequestHandler):
             j = jobs.start('transcribe', b['pid'], 'Распознавание речи', transcribe_job, b['pid'], b['mid'],
                            b.get('lang', 'ru'), b.get('model', 'large-v3-turbo'))
             return self.send_json(j.to_dict())
+        if p == ['enhance']:
+            opts = b.get('opts') or {}
+            if b.get('fid'):
+                j = jobs.start('enhance', None, 'Улучшение качества (с телефона)', enhance_file_job, b['fid'], opts)
+            else:
+                meta = media_meta(b['pid'], b['mid'])
+                if meta.get('status') != 'ready':
+                    return self.send_error_json(409, 'файл ещё готовится — подождите пару секунд')
+                j = jobs.start('enhance', b['pid'], f'Улучшение качества: {meta.get("name", "")}', enhance_media_job,
+                               b['pid'], b['mid'], opts)
+            return self.send_json(j.to_dict())
+        if p == ['enhance', 'revert']:
+            return self.send_json(enhance_revert(b['pid'], b['mid']))
+        if p == ['enhance', 'preview']:
+            opts, t = b.get('opts') or {}, float(b.get('t') or 0)
+            if b.get('fid'):
+                d = xfile_dir(b['fid'])
+                return self.send_json(enhance_preview(xfile_src(b['fid']), t, opts, os.path.join(d, 'pv'), f'/api/xfile/{b["fid"]}/pv/'))
+            meta = media_meta(b['pid'], b['mid'])
+            return self.send_json(enhance_preview(meta.get('original') or meta['path'], t, opts,
+                                                  os.path.join(media_dir(b['pid'], b['mid']), 'enhance_pv'),
+                                                  f'/files/{b["pid"]}/media/{b["mid"]}/enhance_pv/'))
+        if p[0] == 'xfile' and len(p) == 3 and p[2] == 'delete':
+            shutil.rmtree(xfile_dir(p[1]), ignore_errors=True)
+            return self.send_json({'ok': True})
         if p[0] == 'job' and len(p) == 3 and p[2] == 'cancel':
             return self.send_json({'ok': jobs.cancel(p[1])})
         if p == ['out', 'open']:

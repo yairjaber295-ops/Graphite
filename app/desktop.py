@@ -5,13 +5,30 @@ import threading
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import server  # noqa: E402
 
-APPDATA = os.path.join(os.environ.get('LOCALAPPDATA') or os.path.expanduser('~'), 'Graphite')
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+def unblock_files():
+    """Скачанный архив (GitHub, Telegram) Windows помечает «из интернета» — .NET тогда не грузит Python.Runtime.dll
+    и окно не открывается («Failed to resolve Python.Runtime.Loader.Initialize»). Снимаем пометку со своих файлов."""
+    if not getattr(sys, 'frozen', False):
+        return
+    for folder, _, files in os.walk(os.path.dirname(sys.executable)):
+        for name in files:
+            try:
+                os.remove(os.path.join(folder, name) + ':Zone.Identifier')
+            except OSError:
+                pass
+
+
+unblock_files()
+
+import server  # noqa: E402
+from paths import FROZEN, SRC_DIR, WEB_DIR  # noqa: E402
+
+APPDATA = os.path.join(os.environ.get('LOCALAPPDATA') or os.path.expanduser('~'), 'Narezchik')
 APP_ID = 'Graphite.VideoEditor'  # то же значение стоит в ярлыках (tools/build_desktop.ps1)
-EXE = os.path.join(ROOT, 'Graphite.exe')
-ICO = os.path.join(ROOT, 'web', 'icons', 'app.ico')
+EXE = sys.executable if FROZEN else os.path.join(SRC_DIR, 'Graphite.exe')
+ICO = os.path.join(WEB_DIR, 'icons', 'app.ico')
 
 
 # ----------------------------------------------------------------------------

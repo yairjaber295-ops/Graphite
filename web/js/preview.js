@@ -238,12 +238,31 @@ export function draw() {
 }
 
 // --- совместимое превью (для телефонов, где WebGL не видит кадры <video>) ---
-let blackRun = 0, autoCompat = false;
+let blackRun = 0, autoCompat = false, blackAt = 0, blackOk = 0, probe2d = null;
+function sourceIsDark(v) {
+  if (!v) return false;
+  try {
+    probe2d ||= Object.assign(document.createElement('canvas'), { width: 8, height: 8 }).getContext('2d', { willReadFrequently: true });
+    probe2d.drawImage(v, 0, 0, 8, 8);
+    const d = probe2d.getImageData(0, 0, 8, 8).data;
+    let mx = 0;
+    for (let i = 0; i < d.length; i += 4) mx = Math.max(mx, d[i], d[i + 1], d[i + 2]);
+    return mx < 24;
+  } catch { return false; }
+}
 const compatMode = () => autoCompat || !!settings().compatPreview;
 function checkBlack(spec) {
   if (comp.compat || S.playing) return;
+  // проверка читает пиксели с видеочипа (ждёт его) — на телефоне это рывки при перемотке.
+  // Не чаще раза в секунду, и после нескольких нормальных кадров больше не проверяем.
+  if (blackOk >= 6 || performance.now() - blackAt < 1000) return;
+  blackAt = performance.now();
   const live = spec.layers.some((l) => l.el && l.src && l.el.readyState >= 2 && !spec.trans && !l.clip.chroma?.enabled);
-  if (!live || spec.ads.length || !comp.isBlack()) { blackRun = 0; return; }
+  if (!live || spec.ads.length) return;
+  if (!comp.isBlack()) { blackRun = 0; blackOk++; return; }
+  // сам кадр тёмный (ночь, переписка на чёрном фоне)? — тогда WebGL ни при чём
+  if (sourceIsDark(spec.layers.find((l) => l.el && l.src)?.el)) { blackRun = 0; return; }
+  blackAt = 0;   // похоже на чёрный — следующие проверки сразу, чтобы быстро включить совместимый режим
   if (++blackRun >= 3) {
     autoCompat = true;
     console.warn('превью: кадры видео чёрные — включаю совместимый режим');

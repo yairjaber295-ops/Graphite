@@ -21,6 +21,8 @@ ad_library/*
 !ad_library/library.json
 
 output/
+logs/
+_enhance_tmp/
 *.mp4
 *.m4a
 *.wav
@@ -48,11 +50,18 @@ ca.crt
 _backup*/
 
 # ============================================================================
-# Mobile Builds & Large Binaries
+# Builds & Large Binaries (exe-сборка и apk — в GitHub Releases)
 # ============================================================================
 dist/*.apk
 dist/*.aab
 dist/*.zip
+release/
+build/
+
+# нейросеть — скачивается: python tools/get_esrgan.py
+esrgan/*.exe
+esrgan/*.dll
+esrgan/models/
 
 # ============================================================================
 # OS & IDE

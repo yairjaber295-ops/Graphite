@@ -1,0 +1,14 @@
+Сторонние компоненты, которые входят в Graphite
+
+mediabunny (web/vendor) — Mozilla Public License 2.0 — https://github.com/Vanilagy/mediabunny
+qrcode-generator (web/vendor/qrcode.mjs) — MIT — https://github.com/kazuhikoarase/qrcode-generator
+Real-ESRGAN: realesrgan-ncnn-vulkan и модели (esrgan/) — BSD 3-Clause — https://github.com/xinntao/Real-ESRGAN
+ncnn — BSD 3-Clause — https://github.com/Tencent/ncnn
+faster-whisper — MIT — https://github.com/SYSTRAN/faster-whisper (модели Whisper скачиваются при первом использовании)
+CTranslate2 — MIT — https://github.com/OpenNMT/CTranslate2
+pywebview — BSD 3-Clause — https://github.com/r0x0r/pywebview
+FFmpeg (через imageio-ffmpeg) — LGPL/GPL — исходники: https://ffmpeg.org/download.html, https://github.com/imageio/imageio-ffmpeg
+Шрифты (fonts/) — SIL Open Font License 1.1, Google Fonts — https://fonts.google.com, текст лицензии: https://openfontlicense.org
+Capacitor (Android-приложение) — MIT — https://capacitorjs.com
+
+Полные тексты лицензий Real-ESRGAN и ncnn лежат в esrgan/, mediabunny — в web/vendor/.

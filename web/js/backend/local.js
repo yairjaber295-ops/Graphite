@@ -40,14 +40,17 @@ const uid = () => crypto.randomUUID().replace(/-/g, '').slice(0, 12);
 const LIB_KEY = 'narezchik.adlib';
 const libLoad = () => { try { return JSON.parse(localStorage.getItem(LIB_KEY)) || []; } catch { return []; } };
 const libSave = (list) => { try { localStorage.setItem(LIB_KEY, JSON.stringify(list)); } catch { /* приватный режим */ } };
+const needsProxy = (m) => m.kind === 'video' && Math.max(m.width || 0, m.height || 0) > 1000;
 const THUMB_H = 64, THUMB_INTERVAL = 2, PER_TILE = 50, PEAKS_RATE = 20;
 
 export class LocalBackend {
   constructor(pcLink = null) {
     this.kind = 'local';
     this.pc = pcLink; // ServerBackend компа по Wi-Fi (для субтитров), если подключён
-    this.caps = { transcribe: !!pcLink, proxies: false, saveToDisk: false, uploader: false, openFolder: false, pickPaths: false };
+    this.caps = { transcribe: !!pcLink, proxies: false, saveToDisk: false, uploader: false, openFolder: false, pickPaths: false, enhance: !!pcLink };
     this.urls = {};
+    this.xfiles = {};
+    this.proxying = {}; this.proxyProgress = {}; this.proxyChain = Promise.resolve();   // файлы, уже отправленные на комп для улучшения: `${pid}/${mid}` → id на компе
     this.analyzing = {};
   }
 
@@ -134,6 +137,8 @@ export class LocalBackend {
   }
   async dropMedia(pid, mid) {
     await del('files', `${pid}/${mid}`);
+    await del('files', `${pid}/${mid}/orig`);
+    await del('files', `${pid}/${mid}/proxy`);
     await del('media', `${pid}/${mid}`);
     for (const k of await keys('thumbs')) if (String(k).startsWith(`${pid}/${mid}/`)) await del('thumbs', k);
   }
@@ -238,8 +243,67 @@ export class LocalBackend {
         input.dispose?.();
       }
       await put('media', key, meta);
+      if (needsProxy(m)) this.queueProxy(pid, m);
     })();
     return this.analyzing[key];
+  }
+
+  /**
+   * Лёгкая копия для плавной перемотки — как на компе: ≤960 px, ключевой кадр каждые 0.5 с.
+   * В оригиналах с YouTube/телефона ключевые кадры редкие: каждый скачок по таймлайну декодировал сотни кадров.
+   * Делается в фоне аппаратным кодеком телефона, по одной за раз; экспорт и улучшение берут оригинал.
+   */
+  queueProxy(pid, m) {
+    const key = `${pid}/${m.id}`;
+    if (this.proxying[key]) return;
+    this.proxying[key] = this.proxyChain = this.proxyChain.then(() => this.makeProxy(pid, m)).catch((e) => console.warn('лёгкая копия:', e));
+  }
+  async makeProxy(pid, m) {
+    const key = `${pid}/${m.id}`;
+    const meta = (await get('media', key)) || {};
+    if (meta.proxy || meta.proxyFailed) return;
+    const file = await this.file(pid, m.id);
+    if (!file) return;
+    const input = new MB.Input({ source: new MB.BlobSource(file), formats: MB.ALL_FORMATS });
+    const target = new MB.BufferTarget();
+    const output = new MB.Output({ format: new MB.Mp4OutputFormat({ fastStart: 'in-memory' }), target });
+    const t0 = performance.now();
+    try {
+      const conv = await MB.Conversion.init({
+        input, output,
+        // 30 к/с и ~0.9 Мбит/с: 15-минутное видео ≈ 100 МБ в памяти телефона, декодировать вдвое легче, чем 60 к/с
+        video: { ...(m.width >= m.height ? { width: 960 } : { height: 960 }), ...((m.fps || 30) > 32 ? { frameRate: 30 } : {}),
+          codec: 'avc', bitrate: 900_000, keyFrameInterval: 0.5, forceTranscode: true },
+      });
+      if (!conv.isValid) throw new Error(conv.discardedTracks.map((t) => t.reason).join(', ') || 'кодек не поддерживается');
+      conv.onProgress = (p) => { this.proxyProgress[key] = p; };
+      await conv.execute();
+      await put('files', `${key}/proxy`, new Blob([target.buffer], { type: 'video/mp4' }));
+      const cur = (await get('media', key)) || meta;
+      cur.proxy = true;
+      await put('media', key, cur);
+      console.info(`лёгкая копия «${m.name}»: ${((performance.now() - t0) / 1000).toFixed(1)} с`);
+      this.onMeta?.(m.id, { proxy: true });
+    } catch (e) {
+      const cur = (await get('media', key)) || meta;
+      cur.proxyFailed = String(e?.message || e);
+      await put('media', key, cur);
+      throw e;
+    } finally {
+      delete this.proxyProgress[key];
+      input.dispose?.();
+    }
+  }
+  async dropProxy(pid, mid) {
+    const key = `${pid}/${mid}`;
+    await del('files', `${key}/proxy`);
+    const meta = (await get('media', key)) || {};
+    delete meta.proxy; delete meta.proxyFailed;
+    await put('media', key, meta);
+    if (this.urls[`${key}/p`]) URL.revokeObjectURL(this.urls[`${key}/p`]);
+    delete this.urls[`${key}/p`];
+    delete this.proxying[key];
+    this.onMeta?.(mid, { proxy: false });
   }
 
   async mediaState(pid, mid) {
@@ -253,6 +317,9 @@ export class LocalBackend {
         st.tileUrls.push(this.urls[ck]);
       }
     }
+    if (meta.status === 'ready' && !meta.proxy && !meta.proxyFailed && !this.proxying[`${pid}/${mid}`]) {
+      get('projects', pid).then((p) => { const m = p?.media?.find((x) => x.id === mid); if (m && needsProxy(m)) this.queueProxy(pid, m); });
+    }
     if (meta.status === 'preparing' && !this.analyzing[`${pid}/${mid}`]) {
       // приложение перезапускали во время анализа — продолжим
       const p = await get('projects', pid);
@@ -262,13 +329,19 @@ export class LocalBackend {
     return st;
   }
 
-  playUrl(pid, m) {
-    const k = `${pid}/${m.id}`;
-    if (!this.urls[k]) {
+  playUrl(pid, m, st) {
+    const base = `${pid}/${m.id}`;
+    const load = (k, get_) => {
+      if (k in this.urls) return;   // null — уже грузится (раньше файл заново читался на каждом кадре, пока не загрузится)
       this.urls[k] = null;
-      this.file(pid, m.id).then((f) => { if (f) { this.urls[k] = URL.createObjectURL(f); this.onUrl?.(m.id); } });
+      get_().then((f) => { if (f) { this.urls[k] = URL.createObjectURL(f); this.onUrl?.(m.id); } else delete this.urls[k]; });
+    };
+    if (st?.meta?.proxy && m.kind === 'video') {
+      load(`${base}/p`, () => get('files', `${base}/proxy`));
+      if (this.urls[`${base}/p`]) return this.urls[`${base}/p`];
     }
-    return this.urls[k];
+    load(base, () => this.file(pid, m.id));
+    return this.urls[base];
   }
 
   exportSource(pid, m) {
@@ -316,6 +389,56 @@ export class LocalBackend {
     meta.words = res;
     await put('media', key, meta);
     return res;
+  }
+
+  // --- улучшение качества: файл → на комп (там видеокарта) → результат обратно на место исходника
+  async xfile(pid, m, onProgress) {
+    const key = `${pid}/${m.id}`;
+    if (this.xfiles[key]) return this.xfiles[key];
+    if (!this.pc) throw new Error('Подключи комп: улучшение работает на его видеокарте');
+    const f = (await get('files', `${key}/orig`)) || (await this.file(pid, m.id));
+    if (!f) throw new Error('файл не найден');
+    onProgress?.({ message: `Отправляю файл на комп (${Math.round(f.size / 1048576)} МБ)…`, progress: 0 });
+    const r = await fetch(this.pc.url(`/api/xfile?name=${encodeURIComponent(m.name || 'video.mp4')}`), { method: 'POST', body: f });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+    return (this.xfiles[key] = d.fid);
+  }
+  async enhancePreview(pid, m, t, opts) {
+    const fid = await this.xfile(pid, m);
+    const r = await this.pc.req('POST', '/api/enhance/preview', { fid, t, opts });
+    return { ...r, before: this.pc.url(r.before), after: this.pc.url(r.after) };
+  }
+  async enhance(pid, m, opts, onProgress, onJob) {
+    const key = `${pid}/${m.id}`;
+    const fid = await this.xfile(pid, m, onProgress);
+    const job = await this.pc.req('POST', '/api/enhance', { fid, opts });
+    onJob?.(job.id);
+    const r = (await this.pc.waitJob(job.id, onProgress)).result;
+    onProgress?.({ message: 'Забираю результат с компа…', progress: 0.99 });
+    const res = await fetch(this.pc.url(`/api/xfile/${fid}/${r.file}`));
+    if (!res.ok) throw new Error('не удалось скачать результат');
+    const blob = await res.blob();
+    if (!(await get('files', `${key}/orig`))) await put('files', `${key}/orig`, await this.file(pid, m.id));   // оригинал — для «Вернуть»
+    await put('files', key, new File([blob], m.name, { type: r.kind === 'image' ? 'image/png' : 'video/mp4' }));
+    this.resetUrl(key);
+    if (r.kind !== 'image') { await this.dropProxy(pid, m.id); this.queueProxy(pid, { ...m, width: r.width, height: r.height }); }
+    return { width: r.width, height: r.height, enhanced: { ...opts, at: Date.now() / 1000 } };
+  }
+  async unenhance(pid, m) {
+    const key = `${pid}/${m.id}`;
+    const orig = await get('files', `${key}/orig`);
+    const [width, height] = m.enhanced?.from || [m.width, m.height];
+    if (orig) {
+      await put('files', key, orig); await del('files', `${key}/orig`); this.resetUrl(key);
+      if (m.kind === 'video') { await this.dropProxy(pid, m.id); this.queueProxy(pid, { ...m, width, height }); }
+    }
+    return { width, height };
+  }
+  resetUrl(key) {
+    if (this.urls[key]) URL.revokeObjectURL(this.urls[key]);
+    delete this.urls[key];
+    if (this.fileCache) delete this.fileCache[key.split('/')[1]];
   }
 
   /** Экспорт на телефоне: файл собирается в памяти, потом «Поделиться»/«Сохранить». */

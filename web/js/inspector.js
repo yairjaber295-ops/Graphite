@@ -17,6 +17,7 @@ import { hydrateIcons } from './icons.js';
 import { adsSection, chromaEditor } from './adsui.js';
 import { AFX_FILTERS, hasAfx } from './engine/afx.js';
 import { speedControl } from './speedui.js';
+import { openEnhance, enhanceStatus } from './enhanceui.js';
 import { AUDIO_PRESETS, REMIX_STYLES, audioLen, hasAudioProc } from './engine/audioproc.js';
 
 const root = document.getElementById('inspector');
@@ -358,8 +359,11 @@ function renderClip(id, focusTransition = false) {
     c.freeze ? range('Длина стоп-кадра', c.freeze, { min: 0.2, max: 15, step: 0.1, fmt: (v) => v.toFixed(1) + ' с',
       onInput: (v) => commit((p) => setFreezeDur(p, id, v), `freeze-${id}`) }) : null,
     c.freeze ? h('div', { class: 'note' }, 'Видео стоит на этом кадре, звук видео молчит. Длину можно тянуть и за край на таймлайне. «Движение кадра» — наезд на застывший кадр.') : null,
-    !still ? h('div', { class: 'btn-row', style: { marginTop: 0 } },
-      h('button', { class: 'btn', title: 'Видео застынет на кадре под курсором', onclick: () => freezeFrame(S.t, 2) }, '⏸ Стоп-кадр здесь')) : null,
+    h('div', { class: 'btn-row', style: { marginTop: 0 } },
+      !still ? h('button', { class: 'btn', title: 'Видео застынет на кадре под курсором', onclick: () => freezeFrame(S.t, 2) }, '⏸ Стоп-кадр здесь') : null,
+      m && !c.freeze ? h('button', { class: 'btn enh-btn', title: 'Нейросеть Real-ESRGAN на видеокарте компа: чётче, чище, больше разрешение',
+        onclick: () => openEnhance(id) }, enhanceStatus(m.id) ? `✨ Улучшаю… ${Math.round((enhanceStatus(m.id).progress || 0) * 100)}%`
+        : m.enhanced ? '✨ Улучшено' : '✨ Улучшить качество') : null),
     range('Масштаб', c.scale ?? 1, { min: 0.2, max: 4, step: 0.01, fmt: pct, onInput: (v) => set('scale', v) }),
     actions(
       h('button', { class: 'btn', onclick: () => { set('scale', 1, false); set('x', 0, false); set('y', 0, false); render(); } }, 'По ширине'),

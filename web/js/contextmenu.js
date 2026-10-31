@@ -13,6 +13,7 @@ import { clipDur } from './engine/speed.js';
 import { ANIMS_IN } from './engine/text.js';
 import { TEXT_STYLES } from './textstyles.js';
 import { detachAudio } from './detach.js';
+import { openEnhance } from './enhanceui.js';
 
 let cur = null;
 export function closeMenu() { cur?.remove(); cur = null; }
@@ -102,6 +103,7 @@ function clipMenu(id, t) {
     c.freeze ? { label: 'Длина стоп-кадра', sub: [0.5, 1, 2, 3, 5].map((d) => ({ label: `${d} с`, on: Math.abs(c.freeze - d) < 1e-3, action: () => commit((p) => setFreezeDur(p, id, d)) })) } : null,
     { label: 'Разрезать здесь', hint: 'Ctrl+B', action: () => { seek(t); splitAtPlayhead(); } },
     { label: 'Копия клипа', action: () => duplicateClip(id) },
+    c.freeze ? null : { label: m?.enhanced ? '✨ Улучшено — настроить…' : '✨ Улучшить качество…', action: () => openEnhance(id) },
     '-',
     still ? null : { label: 'Звук', sub: [...soundMenu(() => S.project.clips.find((x) => x.id === id), apply), '-',
       { label: 'Отделить звук на дорожку', action: () => detachAudio([id]).catch((e) => toast(e.message, 'err')) }] },
