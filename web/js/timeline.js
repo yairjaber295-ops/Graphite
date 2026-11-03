@@ -1,6 +1,6 @@
 // Таймлайн на canvas: части, тексты, заголовки, субтитры, эффекты, видео (миниатюры + волна + переходы),
 // музыка/звуки (волна + биты). На телефоне курсор закреплён по центру, лента двигается пальцем.
-import { S, on, emit, clipsTL, duration, parts, renderItems, freeTexts, select, isSelected, selItems, selectItems,
+import { S, on, emit, isMusic, clipsTL, duration, parts, renderItems, freeTexts, select, isSelected, selItems, selectItems,
   beginEdit, updateEdit, endEdit, snapFrame, clamp, fmtTime } from './store.js';
 import { setClipIn, setClipOut, mediaDuration, addCut, clipStart, setFreezeDur, moveClip } from './edit.js';
 import { seek, stopPlayback, peekAd } from './preview.js';
@@ -49,15 +49,25 @@ function layout() {
   rows = [];
   let y = RULER;
   const add = (key, h, label, extra = {}) => { rows.push({ key, y, h, label, ...extra }); y += h; };
+  if (isMusic()) {
+    // музыка: только дорожки звука — дорожек по числу пересекающихся треков (+1 свободная), высота поровну
+    const n = Math.max(2, al.count + 1);
+    const laneH = Math.max(34, Math.min(110, Math.floor((H - y - 4) / n)));
+    for (let i = 0; i < n; i++) add('audio', laneH, i ? '' : 'Треки', { lane: i });
+    return { tl, fl, al };
+  }
   add('parts', 22, 'Части');
   for (let i = 0; i < Math.max(1, tl.count); i++) add('text', 24, i ? '' : 'Текст', { lane: i });
   if (S.project.headers.enabled) add('headers', 24, 'Заголовки');
   add('subs', 26, 'Субтитры');
   for (let i = 0; i < Math.max(1, fl.count); i++) add('effects', 24, i ? '' : 'Эффекты', { lane: i });
   if (adPlacements().length) add('ads', 22, 'Реклама');
-  const audioH = Math.max(1, al.count) * 34;
-  add('video', Math.max(64, H - y - audioH - 4), 'Видео');
-  for (let i = 0; i < Math.max(1, al.count); i++) add('audio', 34, i ? '' : 'Музыка', { lane: i });
+  // только музыка: пустой ряд видео узкий, волна песни — крупная
+  const musicOnly = !S.project.clips.length && (S.project.audio || []).length > 0;
+  const n = Math.max(1, al.count);
+  const laneH = musicOnly ? Math.max(34, Math.min(120, Math.floor((H - y - 28 - 4) / n))) : 34;
+  add('video', musicOnly ? 28 : Math.max(64, H - y - n * laneH - 4), 'Видео');
+  for (let i = 0; i < n; i++) add('audio', laneH, i ? '' : 'Музыка', { lane: i });
   return { tl, fl, al };
 }
 
@@ -140,9 +150,27 @@ function draw() {
       ctx.beginPath(); ctx.moveTo(xm, RULER - 4); ctx.lineTo(xm, RULER); ctx.stroke();
     }
   }
-  // биты на линейке
-  ctx.fillStyle = 'rgba(31,181,143,.85)';
-  for (const b of beatTimes()) if (b >= t0 && b <= t1) { ctx.beginPath(); ctx.arc(X(b), RULER - 3, 2, 0, 7); ctx.fill(); }
+  if (S.loopRange) {   // участок цикла — полоса на линейке и подсветка дорожек
+    const x0 = X(S.loopRange.a), x1 = X(S.loopRange.b);
+    ctx.fillStyle = 'rgba(240,180,41,.10)'; ctx.fillRect(x0, RULER, x1 - x0, H);
+    ctx.fillStyle = 'rgba(240,180,41,.75)'; ctx.fillRect(x0, 0, x1 - x0, 4);
+  }
+  if (isMusic() && S.project.bpm) {
+    // сетка тактов: доли тонко, такты ярче и с номером
+    const beat = 60 / S.project.bpm;
+    const every = beat * S.zoom < 7 ? 4 : 1;   // мелко — только такты
+    for (let i = Math.max(0, Math.floor(t0 / beat)); i * beat <= t1; i += 1) {
+      if (i % every) continue;
+      const x = Math.round(X(i * beat)) + 0.5, bar = i % 4 === 0;
+      ctx.strokeStyle = bar ? 'rgba(255,255,255,.13)' : 'rgba(255,255,255,.05)';
+      ctx.beginPath(); ctx.moveTo(x, RULER); ctx.lineTo(x, H); ctx.stroke();
+      if (bar && (beat * 4 * S.zoom > 26 || (i / 4) % 4 === 0)) { ctx.fillStyle = 'rgba(31,181,143,.9)'; ctx.fillText(String(i / 4 + 1), x + 3, RULER - 4); }
+    }
+  } else {
+    // биты на линейке
+    ctx.fillStyle = 'rgba(31,181,143,.85)';
+    for (const b of beatTimes()) if (b >= t0 && b <= t1) { ctx.beginPath(); ctx.arc(X(b), RULER - 3, 2, 0, 7); ctx.fill(); }
+  }
 
   for (const r of rows) {
     if (r.key === 'parts') drawParts(r);
@@ -396,6 +424,12 @@ function drawAudio(a, r) {
 
 /** Биты всех треков в координатах таймлайна (для прилипания и линейки). */
 export function beatTimes() {
+  // музыка с темпом проекта — сетка долей (к ней прилипают треки и бит)
+  if (isMusic() && S.project.bpm) {
+    const step = 60 / S.project.bpm, end = duration() + step * 16, grid = [];
+    for (let i = 0; i * step <= end; i++) grid.push(+(i * step).toFixed(4));
+    return grid;
+  }
   const out = [];
   for (const a of audioItems()) {
     const bt = S.project.beats?.[a.media];

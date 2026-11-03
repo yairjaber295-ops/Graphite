@@ -1,5 +1,7 @@
 // Левая панель (на телефоне — шторка): Медиа, Аудио, Текст, Субтитры, Эффекты, Переходы, Авто (нарезка и эдит), Холст.
-import { S, on, emit, commit, parts, partLabel, subs, STYLE_BASE, fmtTime, clipsTL } from './store.js';
+import { S, on, emit, commit, parts, partLabel, subs, STYLE_BASE, fmtTime, clipsTL, isMusic } from './store.js';
+import { tracksTab } from './musicui.js';
+import { beatTab, stopBeatPreview } from './beatui.js';
 import { h, field, range, color, select as sel, seg, check, textInput, fontPicker, toast, pct, modal } from './ui.js';
 import { drawItem } from './engine/text.js';
 import { EFFECTS, TRANSITIONS, EFFECT_GROUPS, TRANSITION_GROUPS, EFFECT_PACKS, transitionDefaultDur } from './engine/effects.js';
@@ -8,6 +10,7 @@ import { pauseSpans, removePauses, addAccents, clearAccents, addEmoji, removeEmo
 import { addMediaToTimeline, addText, addEffect, addAudio, setTransition, setTransitionAll, effectsOnBeats, cutClipsOnBeats, beatsInTimeline, ASPECTS, setAspect, containScale, addPack } from './edit.js';
 import { rebuildSubs, transcribeAll, missingWords, splitIntoParts, doEverything, timelineWords, cutsSummary, detectBeats } from './auto.js';
 import { seek } from './preview.js';
+import { censorRegions, maskText } from './engine/censor.js';
 import { loadMedia } from './mediastate.js';
 import { fitAll } from './timeline.js';
 import { SFX, renderSfx } from './sfx.js';
@@ -67,7 +70,7 @@ export async function placeMedia(items, kindHint) {
   }
   if (wasEmpty) setTimeout(fitAll, 50);
   // проект без своего названия — называем по первому видео
-  const first = items.find((m) => m.kind !== 'audio');
+  const first = items.find((m) => m.kind !== 'audio') || (!S.project.clips.length && items[0]);   // только музыка — по названию песни
   if (first && (S.project.autoName || /^(Проект|Нарезка|Эдит|История|Shorts|Видео|Слайдшоу|Пустой)[^\n]* \d\d\.\d\d,? \d\d:\d\d$/.test(S.project.name))) {
     const name = cleanTitle(first.name);
     if (name) { commit((p) => { p.name = name; p.autoName = false; }); emit('project-renamed'); }
@@ -237,6 +240,7 @@ function subsTab() {
     busy ? h('div', { class: 'section' }, bar(busy)) : h('div', { class: 'btn-row section' },
       h('button', { class: 'btn primary', onclick: run, disabled: !p.clips.length || !canDo }, icon('subs'), need ? 'Распознать речь' : 'Распознать заново'),
       hasWords ? h('button', { class: 'btn', onclick: () => toast(`Пересобрано: ${rebuildSubs()} субтитров`, 'ok') }, 'Пересобрать') : null),
+    censorSection(hasWords),
     h('h4', {}, 'Как резать на субтитры'),
     range('Символов в субтитре, максимум', o.maxChars, { min: 6, max: 50, onInput: (v) => setOpt('maxChars', v) }),
     range('Длительность, максимум', o.maxDur, { min: 0.8, max: 6, step: 0.1, fmt: (v) => v.toFixed(1) + ' с', onInput: (v) => setOpt('maxDur', v) }),
@@ -247,6 +251,25 @@ function subsTab() {
       presetTile(pr, () => commit((q) => Object.assign(q.subs.style, STYLE_BASE, { wrap: q.subs.style.wrap, size: q.subs.style.size }, pr.style)), 'Субтитры'))),
     h('div', { class: 'note' }, `Субтитров: ${subs().length}. Выдели любой на таймлайне — справа стиль сразу для всех.`),
     subs().length ? h('button', { class: 'btn danger', onclick: () => commit((q) => { q.texts = q.texts.filter((t) => t.track !== 'subs'); }) }, 'Удалить все субтитры') : null);
+}
+
+/** Мат: запикать в звуке (или тишина) и «б***» в субтитрах — по распознанным словам. */
+function censorSection(hasWords) {
+  const c = S.project.censor;
+  const set = (k, v) => commit((q) => { q.censor = { ...q.censor, [k]: v }; });
+  const found = hasWords ? censorRegions(true) : [];
+  return h('div', { class: 'section' },
+    h('h4', {}, '🤬 Мат'),
+    check('Запикивать мат', c.on, (v) => set('on', v)),
+    c.on ? h('div', {},
+      field('Вместо мата', seg({ beep: 'Пик', mute: 'Тишина' }, c.mode || 'beep', (v) => set('mode', v))),
+      check('В субтитрах — «б***»', c.subs !== false, (v) => set('subs', v)),
+      field('Ещё слова (через запятую)', h('input', { type: 'text', value: c.custom || '', spellcheck: false, placeholder: 'например: блин, капец',
+        onchange: (e) => set('custom', e.target.value) }))) : null,
+    h('div', { class: 'note' }, !hasWords ? 'Сначала «Распознать речь» — мат ищется по словам.'
+      : found.length ? `Нашёл: ${found.length}. Нажми — перейти к месту.` : 'Мата не нашёл 👍'),
+    found.length ? h('div', { class: 'chips' }, ...found.slice(0, 60).map((r) => h('button', { class: 'chip-btn', onclick: () => seek(r.s) },
+      `${fmtTime(r.s, false)} ${maskText(r.word)}`))) : null);
 }
 
 // ---------------------------------------------------------------------------
@@ -577,17 +600,38 @@ function canvasTab() {
 }
 
 // ---------------------------------------------------------------------------
-const TABS = { media: mediaTab, audio: audioTab, text: textTab, subs: subsTab, effects: effectsTab, transitions: transitionsTab, auto: autoTab, canvas: canvasTab };
+const TABS = { media: mediaTab, audio: audioTab, text: textTab, subs: subsTab, effects: effectsTab, transitions: transitionsTab, auto: autoTab, canvas: canvasTab,
+  tracks: tracksTab, beat: beatTab };
 export const TAB_LIST = [['media', 'film', 'Медиа'], ['audio', 'music', 'Аудио'], ['text', 'type', 'Текст'], ['subs', 'subs', 'Субтитры'],
   ['effects', 'sparkles', 'Эффекты'], ['transitions', 'transition', 'Переходы'], ['auto', 'wand', 'Авто'], ['canvas', 'canvas', 'Холст']];
+/** Режим «Музыка»: ничего про видео — треки, свой бит, звуки. */
+export const MUSIC_TAB_LIST = [['tracks', 'music', 'Треки'], ['beat', 'beat', 'Бит'], ['audio', 'sparkles', 'Звуки']];
+export const tabList = () => (isMusic() ? MUSIC_TAB_LIST : TAB_LIST);
+
+/** Кнопки вкладок слева — под тип проекта (видео или музыка). */
+export function syncTabs() {
+  document.body.classList.toggle('music-mode', isMusic());   // прячет то, что только для видео
+  const nav = document.getElementById('tabs');
+  const list = tabList();
+  if (nav.dataset.mode !== (isMusic() ? 'music' : 'video')) {
+    nav.dataset.mode = isMusic() ? 'music' : 'video';
+    nav.replaceChildren(...list.map(([k, ic, label]) => h('button', { 'data-tab': k }, h('span', { 'data-icon': ic }), h('b', {}, label))));
+    hydrateIcons(nav);
+  }
+  if (!list.some(([k]) => k === tab)) tab = list[0][0];
+  nav.querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
+}
 
 export function render() {
   if (!S.project) return;
+  syncTabs();
   root.replaceChildren(TABS[tab]());
   hydrateIcons(root);
 }
 
 export function setTab(t) {
+  if (t === 'media' && isMusic()) t = 'tracks';
+  if (tab === 'beat' && t !== 'beat') stopBeatPreview();
   tab = t;
   document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === t));
   render();

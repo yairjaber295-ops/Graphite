@@ -1,9 +1,11 @@
 Сторонние компоненты, которые входят в Graphite
 
 mediabunny (web/vendor) — Mozilla Public License 2.0 — https://github.com/Vanilagy/mediabunny
+@mediabunny/mp3-encoder 1.61.4 (web/vendor, экспорт в MP3) — Mozilla Public License 2.0; внутри LAME MP3 Encoder — LGPL — https://lame.sourceforge.io
 qrcode-generator (web/vendor/qrcode.mjs) — MIT — https://github.com/kazuhikoarase/qrcode-generator
 Real-ESRGAN: realesrgan-ncnn-vulkan и модели (esrgan/) — BSD 3-Clause — https://github.com/xinntao/Real-ESRGAN
 ncnn — BSD 3-Clause — https://github.com/Tencent/ncnn
+Ultimate Vocal Remover: модели UVR-MDX-NET-Inst_HQ_4, Inst_HQ_3 и Kim_Vocal_2 (скачиваются при первом использовании, https://github.com/TRvlvr/model_repo) — https://github.com/Anjok07/ultimatevocalremovergui , onnxruntime — MIT
 faster-whisper — MIT — https://github.com/SYSTRAN/faster-whisper (модели Whisper скачиваются при первом использовании)
 CTranslate2 — MIT — https://github.com/OpenNMT/CTranslate2
 pywebview — BSD 3-Clause — https://github.com/r0x0r/pywebview

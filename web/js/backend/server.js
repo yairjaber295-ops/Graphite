@@ -101,6 +101,21 @@ export class ServerBackend {
   }
   unenhance(pid, m) { return this.req('POST', '/api/enhance/revert', { pid, mid: m.id }); }
 
+  /** Инструментал + вокал (нейросеть на компе) → два новых файла проекта. */
+  async separate(pid, m, onProgress, onJob) {
+    const job = await this.req('POST', '/api/separate', { pid, mid: m.id });
+    onJob?.(job.id);
+    return (await this.waitJob(job.id, onProgress)).result.items;
+  }
+
+  /** Песня без мата: { items: [медиа], regions: [{ s, e, word }] }. */
+  async clean(pid, m, opts, onProgress, onJob) {
+    const job = await this.req('POST', '/api/clean', { pid, mid: m.id, opts });
+    onJob?.(job.id);
+    const r = (await this.waitJob(job.id, onProgress)).result;
+    return { items: r.items, regions: r.regions };
+  }
+
   /** Для экспорта — всегда оригинал. */
   exportSource(pid, m) {
     const mid = typeof m === 'string' ? m : (m?.id || m);
@@ -185,7 +200,8 @@ export function pickFiles(kind = 'video', multiple = true) {
     const inp = document.createElement('input');
     inp.type = 'file';
     inp.multiple = multiple;
-    inp.accept = kind === 'audio' ? 'audio/*,.mp3,.wav,.m4a,.aac,.ogg' : 'video/*,image/*,.mp4,.mov,.mkv,.webm,.jpg,.jpeg,.png,.webp';
+    const sound = 'audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac,.opus';
+    inp.accept = kind === 'audio' ? sound : `video/*,image/*,.mp4,.mov,.mkv,.webm,.jpg,.jpeg,.png,.webp,${sound}`;
     inp.onchange = () => resolve([...inp.files]);
     inp.addEventListener('cancel', () => resolve([]));
     inp.click();

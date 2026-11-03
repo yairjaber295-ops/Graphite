@@ -1,11 +1,11 @@
-# Сборка Android-приложения Graphite (.apk).
+﻿# Сборка Android-приложения Graphite (.apk).
 # Запуск: правый клик → «Выполнить с помощью PowerShell» (или: powershell -ExecutionPolicy Bypass -File build_android.ps1)
 # Первый раз скачает Java 21 и Android SDK (~4 ГБ) и попросит ПРИНЯТЬ ЛИЦЕНЗИИ Android SDK — это нужно сделать самому (y + Enter).
-# Всё ставится в %LOCALAPPDATA%\Graphite\android (инструменты Android не любят кириллицу в путях).
+# Всё ставится в %LOCALAPPDATA%\Narezchik\android (инструменты Android не любят кириллицу в путях).
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $Root = Split-Path -Parent $PSScriptRoot
-$A = Join-Path $env:LOCALAPPDATA 'Graphite\android'
+$A = Join-Path $env:LOCALAPPDATA 'Narezchik\android'
 $JDK_URL = 'https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.12.1%2B1/OpenJDK21U-jdk_x64_windows_hotspot_21.0.12.1_1.zip'
 $SDK_URL = 'https://dl.google.com/android/repository/commandlinetools-win-16111833_latest.zip'
 New-Item -ItemType Directory -Force $A | Out-Null
@@ -63,6 +63,9 @@ npx cap sync android
 $man = 'android\app\src\main\AndroidManifest.xml'
 $x = Get-Content $man -Raw
 if ($x -notmatch 'usesCleartextTraffic') { $x = $x -replace '<application', '<application android:usesCleartextTraffic="true"'; [IO.File]::WriteAllText((Resolve-Path $man), $x) }
+# микрофон — запись голоса в проекте «Музыка»
+$x = Get-Content $man -Raw
+if ($x -notmatch 'RECORD_AUDIO') { $x = $x -replace '(<application)', "<uses-permission android:name=`"android.permission.RECORD_AUDIO`" />`n    <uses-permission android:name=`"android.permission.MODIFY_AUDIO_SETTINGS`" />`n    `$1"; [IO.File]::WriteAllText((Resolve-Path $man), $x) }
 # название на телефоне (cap add записывает его один раз — обновляем сами)
 $strings = 'android\app\src\main\res\values\strings.xml'
 if (Test-Path $strings) {

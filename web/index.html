@@ -14,7 +14,7 @@
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="stylesheet" href="css/app.css">
 <script type="importmap">
-{ "imports": { "mediabunny": "./vendor/mediabunny.min.mjs", "mediabunny-aac": "./vendor/mediabunny-aac-encoder.min.mjs" } }
+{ "imports": { "mediabunny": "./vendor/mediabunny.min.mjs", "mediabunny-aac": "./vendor/mediabunny-aac-encoder.min.mjs", "mediabunny-mp3": "./vendor/mediabunny-mp3-encoder.min.mjs" } }
 </script>
 </head>
 <body>
@@ -116,6 +116,8 @@
       <button class="tool" id="tl-delete" title="Удалить"><span data-icon="trash"></span><b>Удалить</b></button>
       <button class="tool" id="tl-dup" title="Дублировать"><span data-icon="copy"></span></button>
       <button class="tool" id="tl-addcut" title="Граница части"><span data-icon="flag"></span><b>Часть</b></button>
+      <button class="tool music-only" id="tl-loop" title="Цикл: повторять участок (выделенную дорожку или 4 такта от курсора)"><b>🔁 Цикл</b></button>
+      <button class="tool music-only" id="tl-metro" title="Метроном по темпу проекта"><b>𝅘𝅥 Метроном</b></button>
       <div class="spacer"></div>
       <label class="toggle" title="Удаление и обрезка видео сдвигает субтитры, тексты и эффекты"><input type="checkbox" id="tl-ripple" checked><span>Сдвиг</span></label>
       <label class="toggle" title="Прилипание к курсору, краям и битам"><input type="checkbox" id="tl-snap" checked><span>Магнит</span></label>

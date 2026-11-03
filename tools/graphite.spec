@@ -8,7 +8,7 @@ datas = [(os.path.join(ROOT, 'web'), 'web'), (os.path.join(ROOT, 'fonts'), 'font
 if os.path.isfile(os.path.join(ROOT, 'dist', 'Graphite.apk')):
     datas.append((os.path.join(ROOT, 'dist', 'Graphite.apk'), 'dist'))   # «Телефон» → Android: ставится по QR с компа
 binaries = []
-hidden = ['enhance', 'transcribe', 'schedule_queue', 'fonts', 'tls', 'media', 'jobs']
+hidden = ['enhance', 'separate', 'clean', 'transcribe', 'schedule_queue', 'fonts', 'tls', 'media', 'jobs']
 for pkg in ('faster_whisper', 'ctranslate2', 'tokenizers', 'onnxruntime', 'av'):
     try:
         d, b, h = collect_all(pkg)

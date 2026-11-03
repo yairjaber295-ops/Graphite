@@ -60,7 +60,8 @@ export class LocalBackend {
       const cuts = p.parts?.cuts || [];
       const c = p.clips?.[0];
       return { id: p.id, name: p.name, updated: p.updatedAt || 0,
-        duration: (p.clips || []).reduce((s, x) => s + clipDur(x), 0), media: (p.media || []).map((m) => m.name).slice(0, 3),
+        duration: (p.clips || []).reduce((s, x) => s + clipDur(x), 0)
+          || Math.max(0, ...(p.audio || []).map((a) => a.start + (a.out - a.in) / Math.max(0.25, a.speed || 1))), media: (p.media || []).map((m) => m.name).slice(0, 3),
         kind: p.kind || (p.autoedit ? 'edit' : null), profile: p.profile, title: p.title || '', parts: cuts.length ? cuts.length + 1 : 0,
         clips: (p.clips || []).length, subs: (p.texts || []).filter((t) => t.track === 'subs').length,
         aspect: `${p.canvas?.w || 1080}x${p.canvas?.h || 1920}`, poster: !!c,
@@ -425,6 +426,36 @@ export class LocalBackend {
     if (r.kind !== 'image') { await this.dropProxy(pid, m.id); this.queueProxy(pid, { ...m, width: r.width, height: r.height }); }
     return { width: r.width, height: r.height, enhanced: { ...opts, at: Date.now() / 1000 } };
   }
+  /** Инструментал + вокал: файл → на комп (нейросеть там) → два файла обратно в проект на телефоне. */
+  async separate(pid, m, onProgress, onJob) {
+    const fid = await this.xfile(pid, m, onProgress);
+    const job = await this.pc.req('POST', '/api/separate', { fid });
+    onJob?.(job.id);
+    const r = (await this.pc.waitJob(job.id, onProgress)).result;
+    onProgress?.({ message: 'Забираю инструментал и вокал с компа…', progress: 0.99 });
+    const base = (m.name || 'звук').replace(/\.[^.]+$/, '');
+    const items = [];
+    for (const [file, label] of [[r.files[0], 'инструментал'], [r.files[1], 'вокал']]) {
+      const res = await fetch(this.pc.url(`/api/xfile/${fid}/${encodeURIComponent(file)}`));
+      if (!res.ok) throw new Error('не удалось скачать результат');
+      items.push(await this.uploadMedia(pid, new File([await res.blob()], `${base} — ${label}.flac`, { type: 'audio/flac' })));
+    }
+    return items;
+  }
+
+  /** Песня без мата: файл → на комп (нейросеть и Whisper там) → чистая версия обратно в проект на телефоне. */
+  async clean(pid, m, opts, onProgress, onJob) {
+    const fid = await this.xfile(pid, m, onProgress);
+    const job = await this.pc.req('POST', '/api/clean', { fid, opts });
+    onJob?.(job.id);
+    const r = (await this.pc.waitJob(job.id, onProgress)).result;
+    onProgress?.({ message: 'Забираю чистую версию с компа…', progress: 0.99 });
+    const res = await fetch(this.pc.url(`/api/xfile/${fid}/${encodeURIComponent(r.files[0])}`));
+    if (!res.ok) throw new Error('не удалось скачать результат');
+    const base = (m.name || 'звук').replace(/\.[^.]+$/, '');
+    return { items: [await this.uploadMedia(pid, new File([await res.blob()], `${base} — без мата.flac`, { type: 'audio/flac' }))], regions: r.regions };
+  }
+
   async unenhance(pid, m) {
     const key = `${pid}/${m.id}`;
     const orig = await get('files', `${key}/orig`);
@@ -446,7 +477,7 @@ export class LocalBackend {
     const target = new MB.BufferTarget();
     return {
       target, fastStart: 'in-memory',
-      done: async () => ({ name, blob: new Blob([target.buffer], { type: 'video/mp4' }) }),
+      done: async () => ({ name, blob: new Blob([target.buffer], { type: { mp3: 'audio/mpeg', m4a: 'audio/mp4', wav: 'audio/wav' }[name.split('.').pop()] || 'video/mp4' }) }),
     };
   }
   /** Обложка на телефоне: остаётся в памяти — в окне «Готово» её можно отправить или сохранить. */

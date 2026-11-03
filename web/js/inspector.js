@@ -1,5 +1,6 @@
 // Свойства выделенного: клип (фильтр, цвет, переход), текст/субтитры/заголовки, эффект, трек, граница части.
-import { S, on, emit, commit, clipsTL, parts, headerText, duration, fmtTime, subs, uid, selItems, CHROMA_DEFAULTS } from './store.js';
+import { S, on, emit, commit, clipsTL, parts, headerText, duration, fmtTime, subs, uid, selItems, CHROMA_DEFAULTS, isMusic } from './store.js';
+import { musicTrackTools, makeInstrumental, cleanTools } from './musicui.js';
 import { h, field, range, color, select as sel, seg, check, textInput, numberInput, fontPicker, pct, toast } from './ui.js';
 import { ANIMS_IN, ANIMS_OUT, ANIMS_LOOP, TYPING_CPS, typingTimes, displayText } from './engine/text.js';
 import { renderTyping } from './sfx.js';
@@ -15,7 +16,7 @@ import { seek, play, stopPlayback } from './preview.js';
 import { detectBeats } from './auto.js';
 import { hydrateIcons } from './icons.js';
 import { adsSection, chromaEditor } from './adsui.js';
-import { AFX_FILTERS, hasAfx } from './engine/afx.js';
+import { AFX_FILTERS, AFX_PRESETS, hasAfx } from './engine/afx.js';
 import { speedControl } from './speedui.js';
 import { openEnhance, enhanceStatus } from './enhanceui.js';
 import { AUDIO_PRESETS, REMIX_STYLES, audioLen, hasAudioProc } from './engine/audioproc.js';
@@ -176,6 +177,7 @@ const delBtn = () => h('button', { class: 'btn danger', onclick: deleteSelection
 // ---------------------------------------------------------------------------
 
 function renderProject() {
+  if (isMusic()) return renderMusicProject();
   const p = S.project;
   const ps = parts();
   const stat = (v, l) => h('div', { class: 'stat' }, h('b', {}, v), h('span', {}, l));
@@ -195,6 +197,27 @@ function renderProject() {
       go('auto', 'Авто: нарезка и эдит', 'wand'), go('subs', 'Субтитры', 'subs'), go('effects', 'Эффекты', 'sparkles'), go('transitions', 'Переходы', 'transition')),
     h('div', { class: 'tip' }, h('b', {}, 'Совет: '), tip),
     h('div', { class: 'note' }, 'Выдели клип, текст, эффект или трек на таймлайне — здесь появятся его настройки.'));
+}
+
+/** Проект «Музыка»: темп, дорожки, сохранение звука — ничего про кадр и части. */
+function renderMusicProject() {
+  const p = S.project;
+  const stat = (v, l) => h('div', { class: 'stat' }, h('b', {}, v), h('span', {}, l));
+  const count = (k) => p.audio.filter((a) => a.kind === k).length;
+  const go = (tab, label, icon) => h('button', { class: 'btn', onclick: () => import('./panels.js').then((m) => { m.setTab(tab); emit('open-panel'); }) },
+    h('span', { 'data-icon': icon }), label);
+  return h('div', {},
+    h('h3', {}, 'Музыка'),
+    h('div', { class: 'stats' },
+      stat(fmtTime(duration(), false), 'длительность'), stat(p.bpm || '—', 'BPM'), stat(p.audio.length, 'дорожек'),
+      stat(count('music'), 'треков'), stat(count('beat'), 'битов'), stat(count('voice'), 'голос')),
+    h('h4', {}, 'Что сделать'),
+    h('div', { class: 'btn-row', style: { marginTop: 0 } },
+      go('tracks', 'Треки и запись', 'music'), go('beat', 'Собрать бит', 'beat'), go('audio', 'Звуки', 'sparkles')),
+    h('div', { class: 'btn-row' },
+      h('button', { class: 'btn primary', onclick: () => import('./exportui.js').then((m) => m.openExport()) }, h('span', { 'data-icon': 'export' }), 'Сохранить звук (MP3)')),
+    h('div', { class: 'tip' }, h('b', {}, 'Мешап: '), 'задай темп проекта во вкладке «Треки» → у каждого трека «Под N BPM» → сдвигай треки по сетке тактов. Тон — «Тон» в свойствах трека, вокал — «Без вокала / Только вокал».'),
+    h('div', { class: 'note' }, 'Выдели дорожку на таймлайне — здесь появятся её настройки: скорость, тон, эхо, ремикс, эквалайзер, вокал.'));
 }
 
 const TIPS = [
@@ -307,9 +330,17 @@ function afxEditor(get, key) {
   const set = (k, v, merge = true) => commit((p) => { const o = get(p); o.afx = { ...(o.afx || {}), [k]: v }; }, merge ? `${key}-afx-${k}` : null);
   return h('div', { class: 'group', id: 'insp-afx' },
     h('b', {}, 'Эффекты звука'),
-    range('Бас', a.bass || 0, { min: -12, max: 15, step: 1, fmt: (v) => (v > 0 ? '+' : '') + v + ' дБ', onInput: (v) => set('bass', v) }),
+    range('Бас', a.bass || 0, { min: -12, max: 30, step: 1, fmt: (v) => (v > 0 ? '+' : '') + v + ' дБ', onInput: (v) => set('bass', v) }),
+    range('Перегруз (рычание)', a.drive || 0, { min: 0, max: 1, step: 0.05, fmt: (v) => (v ? pct(v) : 'нет'), onInput: (v) => set('drive', v) }),
+    range('Всё кроме баса тише', a.focus || 0, { min: 0, max: 24, step: 1, fmt: (v) => (v ? `−${v} дБ` : 'нет'), onInput: (v) => set('focus', v) }),
+    range('Задушить середину (голос)', a.midcut || 0, { min: 0, max: 24, step: 1, fmt: (v) => (v ? `−${v} дБ` : 'нет'), onInput: (v) => set('midcut', v) }),
+    range('Рвёт колонки (хрип)', a.crush || 0, { min: 0, max: 1, step: 0.05, fmt: (v) => (v ? pct(v) : 'нет'), onInput: (v) => set('crush', v) }),
+    h('div', { class: 'btn-row', style: { marginTop: 0 } },
+      ...[['bassmax', 'Бас ×2'], ['bassext', '💥 Бас ЭКСТРИМ']].map(([k, label]) => h('button', { class: 'btn',
+        onclick: () => { commit((p) => { const o = get(p); o.afx = { ...(o.afx || {}), ...AFX_PRESETS[k].set }; }); render(); } }, label))),
     range('Высокие', a.treble || 0, { min: -12, max: 12, step: 1, fmt: (v) => (v > 0 ? '+' : '') + v + ' дБ', onInput: (v) => set('treble', v) }),
     field('Звучание', sel(AFX_FILTERS, a.filter || 'none', (v) => set('filter', v, false))),
+    range('Панорама', a.pan || 0, { min: -1, max: 1, step: 0.05, fmt: (v) => (Math.abs(v) < 0.03 ? 'центр' : v < 0 ? `Л ${Math.round(-v * 100)}` : `П ${Math.round(v * 100)}`), onInput: (v) => set('pan', v) }),
     hasAfx(a) ? h('div', { class: 'btn-row', style: { marginTop: 0 } }, h('button', { class: 'btn', onclick: () => { commit((p) => { delete get(p).afx; }); render(); } }, 'Сбросить звук')) : null);
 }
 
@@ -479,14 +510,21 @@ function renderAudio(id) {
   const m = S.project.media.find((x) => x.id === a.media);
   const bt = S.project.beats?.[a.media];
   const set = (k, v, merge = true) => commit((p) => { p.audio.find((x) => x.id === id)[k] = v; }, merge ? `aud-${id}-${k}` : null);
+  const music = isMusic();
   return h('div', {},
-    h('h3', {}, { sfx: 'Звук', voice: 'Звук видео' }[a.kind] || 'Музыка'),
+    h('h3', {}, music ? ({ beat: 'Бит', voice: 'Голос', sfx: 'Звук' }[a.kind] || 'Трек') : ({ sfx: 'Звук', voice: 'Звук видео' }[a.kind] || 'Музыка')),
     h('div', { class: 'note' }, `${m?.name || ''} · ${fmtTime(audioLen(a))}${(a.speed || 1) !== 1 ? ` (${+(a.speed).toFixed(2)}×)` : ''}`),
-    field('Тип', seg({ music: 'Музыка', sfx: 'Звук', voice: 'Голос' }, a.kind, (v) => { set('kind', v, false); render(); })),
+    music ? musicTrackTools(a, render) : null,
+    music ? null : field('Тип', seg({ music: 'Музыка', sfx: 'Звук', voice: 'Голос' }, a.kind, (v) => { set('kind', v, false); render(); })),
+    music || a.kind === 'sfx' ? null : h('div', { class: 'btn-row', style: { marginTop: 0 } },
+      h('button', { class: 'btn', title: 'Нейросеть отделит голос от музыки — инструментал и вокал станут отдельными дорожками',
+        onclick: (e) => makeInstrumental(id, e.currentTarget) }, '🎤 Инструментал (нейросеть)')),
+    music || a.kind === 'sfx' ? null : cleanTools(a, render),
     range('Громкость', a.volume ?? 1, { min: 0, max: 2, step: 0.05, fmt: pct, onInput: (v) => set('volume', v) }),
     range('Плавное появление', a.fadeIn || 0, { min: 0, max: 5, step: 0.1, fmt: (v) => v.toFixed(1) + ' с', onInput: (v) => set('fadeIn', v) }),
     range('Плавное затухание', a.fadeOut || 0, { min: 0, max: 5, step: 0.1, fmt: (v) => v.toFixed(1) + ' с', onInput: (v) => set('fadeOut', v) }),
     check('Выключить звук', a.muted, (v) => set('muted', v, false)),
+    isMusic() ? check('Solo — слышно только эту (и другие с Solo)', a.solo, (v) => set('solo', v, false)) : null,
     h('h4', { id: 'insp-aspeed' }, 'Скорость и тон'),
     ...['', 'remix'].map((grp) => h('div', {},
       grp ? h('div', { class: 'note', style: { margin: '6px 0 4px' } }, '🔊 Ремиксы — под песню сам подкладывается бит (по её битам):') : null,
@@ -501,6 +539,8 @@ function renderAudio(id) {
     check('Сохранять тон (иначе — как пластинка: быстрее = выше)', a.keepPitch !== false, (v) => { set('keepPitch', v, false); render(); }),
     range('Тон', a.pitch || 0, { min: -12, max: 12, step: 1, fmt: (v) => (v > 0 ? '+' : '') + v + ' полут.', onInput: (v) => set('pitch', v) }),
     range('Эхо (реверб)', a.reverb || 0, { min: 0, max: 1, step: 0.05, fmt: (v) => (v ? pct(v) : 'нет'), onInput: (v) => set('reverb', v) }),
+    range('Дилей (повторы по темпу)', a.delay || 0, { min: 0, max: 0.8, step: 0.05, fmt: (v) => (v ? pct(v) : 'нет'), onInput: (v) => set('delay', v) }),
+    a.delay ? field('Шаг дилея', seg({ 0.5: '1/8', 0.75: '3/8', 1: '1/4', 1.5: 'точ. 1/4', 2: '1/2' }, String(a.delayDiv || 0.75), (v) => { set('delayDiv', +v, false); render(); })) : null,
     hasAudioProc(a) ? h('div', { class: 'note' }, 'Звук пересчитывается при первом воспроизведении (около секунды), дальше — сразу.') : null,
     afxEditor((p) => p.audio.find((x) => x.id === id), `aud-${id}`),
     h('h4', {}, 'Биты'),

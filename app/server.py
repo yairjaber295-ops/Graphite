@@ -82,7 +82,8 @@ def list_projects():
             cuts = (data.get('parts') or {}).get('cuts') or []
             out.append({'id': d, 'name': data.get('name') or 'Без названия', 'updated': os.path.getmtime(p),
                         # с учётом скорости клипа (кривые — приблизительно, как 1×)
-                        'duration': sum((c['out'] - c['in']) / max(0.1, c.get('speed') or 1) for c in clips),
+                        'duration': sum((c['out'] - c['in']) / max(0.1, c.get('speed') or 1) for c in clips)
+                        or max([a['start'] + (a['out'] - a['in']) / max(0.25, a.get('speed') or 1) for a in data.get('audio') or []] or [0]),
                         'media': [m.get('name') for m in data.get('media', [])][:3],
                         'kind': data.get('kind') or ('edit' if data.get('autoedit') else None),
                         'profile': data.get('profile'), 'title': data.get('title') or '',
@@ -374,6 +375,50 @@ def enhance_preview(src, t, opts, out_dir, url_base):
     return r
 
 
+# ----------------------------------------------------------------------------
+#   Инструментал автоматически (нейросеть UVR-MDX-NET): инструментал + вокал отдельными файлами
+# ----------------------------------------------------------------------------
+def separate_job(job, pid, mid):
+    import separate
+    meta = media_meta(pid, mid)
+    src = meta.get('original') or meta['path']
+    stem = sanitize_filename(os.path.splitext(meta.get('name') or 'звук')[0])[:60] or 'звук'
+    with jobs.gpu_lock:
+        pi, pv = separate.separate(job, src, os.path.join(media_dir(pid, mid), 'stems'), stem)
+    return {'items': [add_media(pid, pi), add_media(pid, pv)]}
+
+
+def separate_file_job(job, fid):
+    import separate
+    d = xfile_dir(fid)
+    with jobs.gpu_lock:
+        pi, pv = separate.separate(job, xfile_src(fid), d, 'звук')
+    return {'fid': fid, 'files': [os.path.basename(pi), os.path.basename(pv)]}
+
+
+def clean_job(job, pid, mid, opts):
+    import clean
+    meta = media_meta(pid, mid)
+    src = meta.get('original') or meta['path']
+    stem = sanitize_filename(os.path.splitext(meta.get('name') or 'звук')[0])[:60] or 'звук'
+    with jobs.gpu_lock:
+        path, regions = clean.clean(job, src, os.path.join(media_dir(pid, mid), 'stems'), stem, **_clean_opts(opts))
+    return {'items': [add_media(pid, path)], 'regions': regions}
+
+
+def clean_file_job(job, fid, opts):
+    import clean
+    with jobs.gpu_lock:
+        path, regions = clean.clean(job, xfile_src(fid), xfile_dir(fid), 'звук', **_clean_opts(opts))
+    return {'fid': fid, 'files': [os.path.basename(path)], 'regions': regions}
+
+
+def _clean_opts(o):
+    o = o or {}
+    return {'mode': o.get('mode') if o.get('mode') in ('mute', 'reverse', 'beep') else 'mute', 'lang': o.get('lang') or 'ru',
+            'model': o.get('model') or None, 'custom': [str(x) for x in (o.get('custom') or [])][:100]}
+
+
 def transcribe_job(job, pid, mid, lang, model):
     import transcribe
     meta = media_meta(pid, mid)
@@ -440,9 +485,10 @@ def pick_files(kind):
                 return [os.path.normpath(p)] if p else []
             video = '*.mp4 *.mov *.mkv *.webm *.avi *.m4v'
             photo = ' '.join('*' + e for e in media.IMAGE_EXT)
-            types = ([('Звук', '*.mp3 *.wav *.m4a *.aac *.ogg *.flac')] if kind == 'audio'
-                     else [('Видео и фото', f'{video} {photo}'), ('Видео', video), ('Фото', photo)])
-            paths = filedialog.askopenfilenames(parent=root, title='Выбери музыку' if kind == 'audio' else 'Выбери видео или фото',
+            sound = '*.mp3 *.wav *.m4a *.aac *.ogg *.flac *.opus'
+            types = ([('Звук', sound)] if kind == 'audio'
+                     else [('Видео, фото и звук', f'{video} {photo} {sound}'), ('Видео', video), ('Фото', photo), ('Звук', sound)])
+            paths = filedialog.askopenfilenames(parent=root, title='Выбери музыку' if kind == 'audio' else 'Выбери видео, фото или музыку',
                                                 initialdir=WORK_DIR, filetypes=types + [('Все файлы', '*.*')])
             return [os.path.normpath(p) for p in paths]
         finally:
@@ -872,6 +918,24 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send_error_json(409, 'файл ещё готовится — подождите пару секунд')
                 j = jobs.start('enhance', b['pid'], f'Улучшение качества: {meta.get("name", "")}', enhance_media_job,
                                b['pid'], b['mid'], opts)
+            return self.send_json(j.to_dict())
+        if p == ['separate']:
+            if b.get('fid'):
+                j = jobs.start('separate', None, 'Инструментал (с телефона)', separate_file_job, b['fid'])
+            else:
+                meta = media_meta(b['pid'], b['mid'])
+                if meta.get('status') != 'ready':
+                    return self.send_error_json(409, 'файл ещё готовится — подождите пару секунд')
+                j = jobs.start('separate', b['pid'], f'Инструментал: {meta.get("name", "")}', separate_job, b['pid'], b['mid'])
+            return self.send_json(j.to_dict())
+        if p == ['clean']:
+            if b.get('fid'):
+                j = jobs.start('clean', None, 'Без мата (с телефона)', clean_file_job, b['fid'], b.get('opts'))
+            else:
+                meta = media_meta(b['pid'], b['mid'])
+                if meta.get('status') != 'ready':
+                    return self.send_error_json(409, 'файл ещё готовится — подождите пару секунд')
+                j = jobs.start('clean', b['pid'], f'Без мата: {meta.get("name", "")}', clean_job, b['pid'], b['mid'], b.get('opts'))
             return self.send_json(j.to_dict())
         if p == ['enhance', 'revert']:
             return self.send_json(enhance_revert(b['pid'], b['mid']))

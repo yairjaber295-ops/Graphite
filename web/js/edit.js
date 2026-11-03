@@ -332,8 +332,10 @@ export function addAudio(m, kind = m.duration > 20 ? 'music' : 'sfx') {
   const id = uid();
   const start = snapFrame(S.t >= duration() - 0.05 ? 0 : S.t);
   commit((p) => {
-    p.audio.push({ id, media: m.id, kind, start, in: 0, out: m.duration, volume: kind === 'music' ? 0.6 : 1,
-      fadeIn: kind === 'music' ? 0.5 : 0, fadeOut: kind === 'music' ? 1.5 : 0 });
+    // в видео музыка тише голоса и с плавными краями; в проекте «Музыка» — как есть
+    const under = kind === 'music' && p.kind !== 'music';
+    p.audio.push({ id, media: m.id, kind, start, in: 0, out: m.duration, volume: under ? 0.6 : 1,
+      fadeIn: under ? 0.5 : 0, fadeOut: under ? 1.5 : 0 });
   });
   select('audio', [id]);
   return id;

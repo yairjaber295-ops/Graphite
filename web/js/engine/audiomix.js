@@ -7,6 +7,7 @@ import { duckPoints } from '../smart.js';
 import { adPlacements, adGain } from './ads.js';
 import { hasAfx, makeChain, setChain } from './afx.js';
 import { audioLen, audioSpeed, processedBuffer } from './audioproc.js';
+import { censorRegions, automateCensor, addBeeps } from './censor.js';
 
 export const SAMPLE_RATE = 48000;
 
@@ -42,15 +43,16 @@ export class AudioMixer {
    * audioSink(mid) → Promise<AudioBufferSink|null> — потоковое чтение звука видео;
    * decoded(mid) → Promise<AudioBuffer|null> — целиком декодированная музыка/звук.
    */
-  constructor({ audioSink, decoded }) {
+  constructor({ audioSink, decoded, only = null }) {
     this.audioSink = audioSink;
     this.decoded = decoded;
+    this.only = only ? new Set(only) : null;   // только эти дорожки (стемы)
   }
 
   async mix(a, b) {
     const len = Math.max(1, Math.round((b - a) * SAMPLE_RATE));
     const ctx = new OfflineAudioContext(2, len, SAMPLE_RATE);
-    const list = clipsTL();
+    const list = this.only ? [] : clipsTL();   // стем дорожки — без звука видео
     for (let j = 0; j < list.length; j++) {
       const c = list[j];
       const [w0, w1] = clipWindow(list, j);
@@ -59,7 +61,14 @@ export class AudioMixer {
       const sink = await this.audioSink(c.media);
       if (!sink) continue;
       const from = Math.max(a, w0), to = Math.min(b, w1);
-      const dest = outNode(ctx, c.afx); // бас, высокие, «телефон»… — одна цепочка на весь кусок клипа
+      let dest = outNode(ctx, c.afx); // бас, высокие, «телефон»… — одна цепочка на весь кусок клипа
+      if (censorRegions().some((r) => r.e > from && r.s < to)) {
+        // мат: звук клипа глушится (пик добавляется ниже, один на всё видео)
+        const cg = ctx.createGain();
+        automateCensor(cg.gain, a, b);
+        cg.connect(dest);
+        dest = cg;
+      }
       if (Math.abs((c.speed || 1) - 1) > 1e-6) {
         await this.stretched(ctx, sink, c, from, to, a, dest);
         continue;
@@ -77,14 +86,17 @@ export class AudioMixer {
         node.start(st - a, st - tt, en - st);
       }
     }
+    if (!this.only) addBeeps(ctx, a, b);
     // звук рекламы поверх видео (у вставок с паузой — свой кусок, mixAd)
     for (const ad of adPlacements()) {
       if (ad.insert || ad.end <= a || ad.start >= b) continue;
       await this.adAudio(ctx, ad, Math.max(a, ad.start) - ad.start, Math.min(b, ad.end) - ad.start, Math.max(0, ad.start - a));
     }
+    const solo = (S.project.audio || []).some((it) => it.solo && !it.muted);
     for (const it of S.project.audio || []) {
       const end = it.start + audioLen(it);
       if (end <= a || it.start >= b || it.muted) continue;
+      if (this.only ? !this.only.has(it.id) : solo && !it.solo) continue;   // стем — одна дорожка; иначе solo
       // скорость/тон/эхо: звук обработан целиком заранее; в нём секунда исходника s — на месте s / speed
       const buf = await processedBuffer(it, await this.decoded(it.media));
       if (!buf) continue;
@@ -106,7 +118,26 @@ export class AudioMixer {
       node.connect(g).connect(outNode(ctx, it.afx));
       node.start(st - a, it.in / audioSpeed(it) + (st - it.start), en - st);
     }
-    return ctx.startRendering();
+    return this.limit(await ctx.startRendering());
+  }
+
+  /**
+   * Лимитер на общий выход: на пиках громкость плавно убавляется (мгновенно вниз, обратно за ~0.25 с),
+   * состояние живёт между кусками сведения — склейки без скачков. Остаток ловит мягкое ограничение.
+   */
+  limit(buf) {
+    const CEIL = 0.94, sr = buf.sampleRate, rel = 1 - Math.exp(-1 / (0.25 * sr));
+    const ch = Array.from({ length: buf.numberOfChannels }, (_, c) => buf.getChannelData(c));
+    let env = this.limEnv ?? 1;
+    for (let i = 0; i < buf.length; i++) {
+      let pk = 0;
+      for (const d of ch) { const v = d[i] < 0 ? -d[i] : d[i]; if (v > pk) pk = v; }
+      const want = pk > CEIL ? CEIL / pk : 1;
+      env = want < env ? want : env + (want - env) * rel;
+      if (env < 1) for (const d of ch) d[i] *= env;
+    }
+    this.limEnv = env;
+    return softClip(buf);
   }
 
   /** Звук вставки рекламы (видео на паузе): кусок [a0, a1) от начала ролика, только сам ролик. */
@@ -173,6 +204,22 @@ export class AudioMixer {
     node.connect(g).connect(dest);
     node.start(from - a, (srcA - r0) / s, to - from);
   }
+}
+
+/**
+ * Мягкое ограничение: всё, что тише 0.9, не меняется; громче — плавно прижимается к 1.0 вместо жёсткого хрипа
+ * (бит + трек в мешапе легко складываются выше нуля). Без памяти между кусками — склейки чистые.
+ */
+export function softClip(buf) {
+  const K = 0.9, R = 1 - K;
+  for (let c = 0; c < buf.numberOfChannels; c++) {
+    const d = buf.getChannelData(c);
+    for (let i = 0; i < d.length; i++) {
+      const v = d[i], av = v < 0 ? -v : v;
+      if (av > K) d[i] = (v < 0 ? -1 : 1) * (K + R * Math.tanh((av - K) / R));
+    }
+  }
+  return buf;
 }
 
 /** Звук исходника на отрезке [r0, r1] одним куском (до 2 каналов). */

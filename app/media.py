@@ -49,7 +49,20 @@ def probe(path):
         raise RuntimeError('не удалось прочитать файл (это точно видео или звук?)')
     if info['kind'] == 'audio':
         info.update(width=None, height=None, fps=None)
+    if 'Estimating duration from bitrate' in err:
+        # mp3 без VBR-заголовка: длина по битрейту бывает сильно неверной (1:09 вместо 0:50) — считаем точно
+        real = exact_duration(path)
+        if real:
+            info['duration'] = real
     return info
+
+
+def exact_duration(path):
+    """Точная длина: прогон звука через ffmpeg без вывода (секунды на длинный трек)."""
+    res = subprocess.run([FFMPEG, '-hide_banner', '-nostats', '-v', 'error', '-progress', 'pipe:1', '-i', path, '-vn', '-f', 'null', '-'],
+                         capture_output=True, text=True, encoding='utf-8', errors='ignore', creationflags=NO_WINDOW)
+    times = re.findall(r'out_time_us=(\d+)', res.stdout)
+    return round(int(times[-1]) / 1e6, 3) if times and int(times[-1]) > 0 else None
 
 
 def run_ffmpeg(job, args, duration, p0=0.0, p1=1.0, cwd=None, on_time=None):

@@ -1,5 +1,6 @@
 // Раскладка и отрисовка текста и обложек на 2D-холсте. Этим же кодом рисуются и превью, и экспорт.
 import { S, fontInfo, cssFont } from '../store.js';
+import { censorText } from './censor.js';
 
 export const ANIMS_IN = {
   none: 'Нет', fade: 'Проявление', pop: 'Выпрыгивание', bounce: 'Пружина', grow: 'Из точки', zoom: 'Из большого',
@@ -179,7 +180,8 @@ export function wrapLines(text, maxChars) {
 }
 
 export function displayText(item) {
-  const s = item.style.upper ? String(item.text).toUpperCase() : String(item.text);
+  const txt = censorText(item);   // мат в субтитрах → «б***»
+  const s = item.style.upper ? String(txt).toUpperCase() : String(txt);
   return wrapLines(s, item.style.wrap);
 }
 

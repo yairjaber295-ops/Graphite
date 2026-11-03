@@ -85,6 +85,7 @@ export function normalize(p) {
     background: { mode: 'blur', blur: 40, dim: 0.15, color: '#000000' },
     media: [], clips: [], texts: [], effects: [], audio: [], beats: {}, overlays: [],
     ducking: { enabled: false, level: 0.3, threshold: 0.16 },
+    censor: { on: false, mode: 'beep', subs: true, custom: '', song: 'mute' },   // запикивание мата (engine/censor.js)
     ads: AD_DEFAULTS,
     subs: {
       style: { ...STYLE_BASE }, x: 540, y: 1400,
@@ -256,9 +257,17 @@ export function clipsTL() {
   return clipCache;
 }
 
+/** Проект «Музыка»: свои вкладки, таймлайн только из звука, сетка тактов по BPM. */
+export const isMusic = () => S.project?.kind === 'music';
+
 export function duration() {
   const c = clipsTL();
-  return c.length ? c[c.length - 1].end : 0;
+  const video = c.length ? c[c.length - 1].end : 0;
+  // проект без видео (только музыка) или «Музыка» — длина по звуку; в видеопроектах трек длиннее видео его не растягивает
+  if (video && S.project.kind !== 'music') return video;
+  let sound = 0;
+  for (const a of S.project.audio || []) sound = Math.max(sound, a.start + (a.out - a.in) / Math.max(0.25, Math.min(4, a.speed || 1)));
+  return Math.max(video, sound);
 }
 
 export function clipAt(t) {

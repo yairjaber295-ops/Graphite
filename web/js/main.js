@@ -5,7 +5,7 @@ import { loadFonts } from './engine/text.js';
 import { resize as resizePreview, seek, togglePlay, stopPlayback, resetVideos, draw, play } from './preview.js';
 import { resize as resizeTimeline, fitAll, request as redrawTimeline, setZoom } from './timeline.js';
 import { render as renderInspector } from './inspector.js';
-import { render as renderPanel, setTab, importMedia, TAB_LIST, currentTab, setAutoMode, placeMedia } from './panels.js';
+import { render as renderPanel, setTab, importMedia, tabList, currentTab, setAutoMode, placeMedia } from './panels.js';
 import { splitAtPlayhead, deleteSelection, trimToPlayhead, addCut, duplicateSelection, addText, selectAll, ASPECTS } from './edit.js';
 import { loadMedia } from './mediastate.js';
 import { openExport } from './exportui.js';
@@ -81,7 +81,7 @@ function buildMobileBar() {
     items.push(b('split', 'Разрезать', splitAtPlayhead));
     items.push(multi);
   }
-  for (const [tab, icon, label] of TAB_LIST) {
+  for (const [tab, icon, label] of tabList()) {
     items.push(b(icon, label, () => { setTab(tab); openSheet('panel'); }, $('panel').classList.contains('open') && currentTab() === tab));
   }
   bar.replaceChildren(...items);
@@ -237,6 +237,7 @@ const PROJECT_TYPES = {
   story: { icon: 'story', label: 'История (Reddit)', desc: 'Карточка поста, крупные слова по центру, геймплей на фоне', aspect: '9:16', preset: () => 'reddit', tab: 'auto', mode: 'cut' },
   shorts: { icon: 'phone', label: 'Shorts / Reels / TikTok', desc: 'Вертикальное видео одним куском, субтитры', aspect: '9:16', preset: () => 'shorts', tab: 'subs' },
   youtube: { icon: 'youtube', label: 'Видео для YouTube', desc: '16:9, аккуратные субтитры, без частей', aspect: '16:9', preset: () => 'youtube', tab: 'subs' },
+  music: { icon: 'music', label: 'Музыка', desc: 'Свой бит, мешапы, ремиксы (slowed + reverb, хардтек…), запись голоса. Сохраняй в MP3', aspect: '9:16', tab: 'tracks', music: true },
   slides: { icon: 'image', label: 'Слайдшоу из фото', desc: 'Фото с плавным движением и переходами, музыка', aspect: '9:16', preset: () => 'shorts', tab: 'audio', slides: true },
   empty: { icon: 'square', label: 'Пустой проект', desc: 'Без настроек — всё вручную', aspect: null, tab: 'media' },
 };
@@ -270,7 +271,7 @@ async function addFiles(files) {
 }
 
 // перетаскивание файлов в окно: на главном — новый проект, в редакторе — в текущий
-const MEDIA_RE = /\.(mp4|mov|mkv|webm|m4v|avi|mp3|wav|m4a|aac|ogg|flac|jpe?g|png|webp)$/i;
+const MEDIA_RE = /\.(mp4|mov|mkv|webm|m4v|avi|mp3|wav|m4a|aac|ogg|flac|opus|jpe?g|png|webp)$/i;
 const dropHint = h('div', { class: 'drop-hint', hidden: true }, 'Отпусти — добавлю в проект');
 document.body.append(dropHint);
 window.addEventListener('dragover', (e) => { if (e.dataTransfer?.types?.includes('Files')) { e.preventDefault(); dropHint.hidden = false; } });
@@ -283,7 +284,7 @@ window.addEventListener('drop', async (e) => {
   if (!files.length) return toast('Это не видео, звук или фото');
   try {
     if (S.project) await addFiles(files);
-    else await createTyped('cut', '', files);
+    else await createTyped(files.every((f) => /^audio\//.test(f.type) || /\.(mp3|wav|m4a|aac|ogg|flac|opus)$/i.test(f.name)) ? 'music' : 'cut', '', files);
   } catch (err) { toast(err.message, 'err'); }
 });
 
@@ -298,7 +299,14 @@ async function createTyped(kind, title = '', files = null) {
   setTab(t.tab);
   if (t.mode) setAutoMode(t.mode);
   if (files?.length) await addFiles(files);
-  else await importMedia('video').catch((e) => toast(e.message, 'err'));
+  else if (!t.music) await importMedia('video').catch((e) => toast(e.message, 'err'));   // музыку можно начать и с бита — без окна выбора
+  if (t.music) {
+    // музыка слушается сама по себе: полная громкость, без затуханий, сразу плеер с пресетами
+    // несколько песен — подряд, как плейлист
+    commit((q) => { let at = 0; for (const a of q.audio) { Object.assign(a, { kind: 'music', volume: 1, fadeIn: 0, fadeOut: 0, start: at }); at += (a.out - a.in) / (a.speed || 1); } });
+    if (S.project.audio[0]) select('audio', [S.project.audio[0].id]);
+    renderInspector();
+  }
   if (t.slides && S.project.clips.length) {
     // слайдшоу: у фото — плавное движение, между ними — растворение
     const order = ['zoomin', 'panleft', 'zoomout', 'panright'];
@@ -325,7 +333,7 @@ async function openProject(pid, kind = null) {
     // новый пустой проект — сразу в настройках выбранного пресета
     applyTo(S.project, defaultProfile());
   }
-  S.undo = []; S.redo = [];
+  S.undo = []; S.redo = []; S.loopRange = null;
   S.t = 0; S.sel = { kind: null, ids: [] }; S.media = {}; S.scroll = 0;
   resetVideos();
   $('home').hidden = true;
@@ -560,6 +568,26 @@ $('tl-dup').onclick = duplicateSelection;
 $('tl-trim-l').onclick = () => trimToPlayhead('l');
 $('tl-trim-r').onclick = () => trimToPlayhead('r');
 $('tl-addcut').onclick = () => addCut(S.t);
+// цикл участка: выделенная дорожка, иначе 4 такта от такта под курсором
+$('tl-loop').onclick = () => {
+  if (S.loopRange) { S.loopRange = null; toast('Цикл выключен'); }
+  else {
+    const sel = S.sel.kind === 'audio' && S.project.audio.find((a) => S.sel.ids.includes(a.id));
+    const bar = 4 * 60 / (S.project.bpm || 120);
+    const a0 = sel ? sel.start : Math.floor(S.t / bar) * bar;
+    const b0 = sel ? sel.start + (sel.out - sel.in) / (sel.speed || 1) : a0 + 4 * bar;
+    S.loopRange = { a: a0, b: Math.min(b0, duration()) || a0 + 4 * bar };
+    toast(`Цикл: ${fmtTime(S.loopRange.a)} – ${fmtTime(S.loopRange.b)}`, 'ok');
+  }
+  $('tl-loop').classList.toggle('on', !!S.loopRange);
+  emit('time');
+};
+$('tl-metro').onclick = () => {
+  S.metro = !S.metro;
+  $('tl-metro').classList.toggle('on', S.metro);
+  if (S.metro && !S.project.bpm) toast('Задай темп проекта во вкладке «Треки» — метроном идёт по нему');
+  if (S.playing) { stopPlayback(); play(); }
+};
 $('tl-ripple').onchange = (e) => { S.ripple = e.target.checked; };
 $('tl-snap').onchange = (e) => { S.snap = e.target.checked; };
 

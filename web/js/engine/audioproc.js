@@ -11,7 +11,9 @@ export const audioLen = (it) => (it.out - it.in) / audioSpeed(it);
 export const audioSrcAt = (it, t) => it.in + (t - it.start) * audioSpeed(it);
 /** Момент таймлайна для секунды исходника (биты, волна). */
 export const audioTlOf = (it, src) => it.start + (src - it.in) / audioSpeed(it);
-export const hasAudioProc = (it) => audioSpeed(it) !== 1 || (it.pitch || 0) !== 0 || (it.reverb || 0) > 0 || !!it.remix;
+export const hasAudioProc = (it) => audioSpeed(it) !== 1 || (it.pitch || 0) !== 0 || (it.reverb || 0) > 0 || !!it.remix || (it.delay || 0) > 0;
+/** Время дилея (с): доля такта (delayDiv — в долях: 0.5 = 1/8, 0.75 = 3/8, 1 = 1/4) по темпу проекта. */
+export const delayTime = (it) => (it.delayDiv || 0.75) * 60 / (S.project?.bpm || 120);
 
 /** Стили ремикса: бит, который приложение само подкладывает под найденные биты песни. */
 export const REMIX_STYLES = { hardtek: 'Хардтек', hardstyle: 'Хардстайл', phonk: 'Фонк-ремикс', jersey: 'Джерси-клаб', techno: 'Техно', bass: 'Бас-буст ремикс' };
@@ -41,7 +43,7 @@ const cache = new Map();
 export function processedBuffer(it, buf) {
   if (!buf || !hasAudioProc(it)) return Promise.resolve(buf);
   const bt = S.project?.beats?.[it.media];
-  const key = `${it.media}|${audioSpeed(it)}|${it.keepPitch !== false}|${it.pitch || 0}|${it.reverb || 0}|${it.remix || ''}|${it.remixAmt ?? ''}|${bt?.beats?.length || 0}`;
+  const key = `${it.media}|${audioSpeed(it)}|${it.keepPitch !== false}|${it.pitch || 0}|${it.reverb || 0}|${it.remix || ''}|${it.remixAmt ?? ''}|${bt?.beats?.length || 0}|${it.delay || 0}|${(it.delay || 0) > 0 ? delayTime(it) : ''}`;
   if (!cache.has(key)) {
     cache.set(key, render(it, buf).catch((e) => { cache.delete(key); console.warn('обработка звука:', e); return buf; }));
     if (cache.size > 12) cache.delete(cache.keys().next().value); // не держим в памяти много версий песни
@@ -63,6 +65,7 @@ async function render(it, buf) {
   let out = new AudioBuffer({ length: Math.max(1, chans[0].length), numberOfChannels: chans.length, sampleRate: sr });
   chans.forEach((d, c) => out.copyToChannel(d, c));
   if ((it.reverb || 0) > 0) out = await addReverb(out, it.reverb);
+  if ((it.delay || 0) > 0) out = addDelay(out, it.delay, delayTime(it));
   if (it.remix) {
     // бит под песню: биты исходника (с) → в обработанном звуке они на s / speed
     const bt = S.project?.beats?.[it.media];
@@ -77,10 +80,11 @@ async function render(it, buf) {
 const sampleCache = new Map();
 
 /** Один удар, отрисованный заранее (дальше в ремиксе он просто повторяется — это быстро). */
-async function oneShot(name, sr) {
+export async function oneShot(name, sr) {
   const key = `${name}|${sr}`;
   if (sampleCache.has(key)) return sampleCache.get(key);
-  const len = { kick: 0.35, hardkick: 0.4, longkick: 0.65, sub808: 0.9, clap: 0.25, hat: 0.06, openhat: 0.28, cowbell: 0.32, roll: 0.14 }[name];
+  const len = { kick: 0.35, hardkick: 0.4, longkick: 0.65, sub808: 0.9, clap: 0.25, hat: 0.06, openhat: 0.28, cowbell: 0.32, roll: 0.14, snare: 0.26, rim: 0.07,
+    tom: 0.45, shaker: 0.09, crash: 1.6, snap: 0.14, perc: 0.12 }[name];
   const ctx = new OfflineAudioContext(1, Math.round(sr * len), sr);
   const out = ctx.createGain();
   out.connect(ctx.destination);
@@ -147,6 +151,51 @@ async function oneShot(name, sr) {
     env(g, 0.6, 0.001, name === 'hat' ? 0.045 : 0.25);
     n.connect(hp).connect(g).connect(out);
     n.start(0);
+  } else if (name === 'snare') {
+    // снейр: тон 185 Гц + шум через полосовой
+    const o = ctx.createOscillator(), go = ctx.createGain();
+    o.frequency.setValueAtTime(240, 0); o.frequency.exponentialRampToValueAtTime(170, 0.05);
+    env(go, 0.55, 0.001, 0.09);
+    o.connect(go).connect(out); o.start(0); o.stop(len);
+    const n = noise(len), bp = ctx.createBiquadFilter(), gn = ctx.createGain();
+    bp.type = 'highpass'; bp.frequency.value = 1800;
+    env(gn, 0.8, 0.001, 0.2);
+    n.connect(bp).connect(gn).connect(out); n.start(0);
+    out.gain.value = 0.9;
+  } else if (name === 'rim') {
+    const o = ctx.createOscillator(), g = ctx.createGain(), bp = ctx.createBiquadFilter();
+    o.type = 'triangle'; o.frequency.value = 1700;
+    bp.type = 'bandpass'; bp.frequency.value = 1700; bp.Q.value = 4;
+    env(g, 0.8, 0.0005, 0.05);
+    o.connect(bp).connect(g).connect(out); o.start(0); o.stop(len);
+  } else if (name === 'tom') {
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.frequency.setValueAtTime(190, 0); o.frequency.exponentialRampToValueAtTime(85, 0.35);
+    env(g, 0.9, 0.002, 0.4);
+    o.connect(g).connect(out); o.start(0); o.stop(len);
+  } else if (name === 'shaker') {
+    const n = noise(len), bp = ctx.createBiquadFilter(), g = ctx.createGain();
+    bp.type = 'bandpass'; bp.frequency.value = 6500; bp.Q.value = 1.4;
+    g.gain.setValueAtTime(0.0001, 0); g.gain.exponentialRampToValueAtTime(0.5, 0.02); g.gain.exponentialRampToValueAtTime(0.0001, 0.085);
+    n.connect(bp).connect(g).connect(out); n.start(0);
+  } else if (name === 'crash') {
+    // тарелка: шум через два высоких полосовых + металлические квадраты
+    const n = noise(len), hp = ctx.createBiquadFilter(), g = ctx.createGain();
+    hp.type = 'highpass'; hp.frequency.value = 5000;
+    env(g, 0.5, 0.002, 1.5);
+    n.connect(hp).connect(g).connect(out); n.start(0);
+    for (const f of [3600, 5150, 7300]) { const o = ctx.createOscillator(), go = ctx.createGain(); o.type = 'square'; o.frequency.value = f; env(go, 0.03, 0.002, 1); o.connect(go).connect(hp); o.start(0); o.stop(len); }
+  } else if (name === 'snap') {
+    const bp = ctx.createBiquadFilter(), g = ctx.createGain();
+    bp.type = 'bandpass'; bp.frequency.value = 2200; bp.Q.value = 2;
+    const n = noise(len); env(g, 1, 0.001, 0.1);
+    n.connect(bp).connect(g).connect(out); n.start(0);
+  } else if (name === 'perc') {
+    // деревянный блок
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = 'sine'; o.frequency.setValueAtTime(900, 0); o.frequency.exponentialRampToValueAtTime(700, 0.05);
+    env(g, 0.9, 0.001, 0.1);
+    o.connect(g).connect(out); o.start(0); o.stop(len);
   } else if (name === 'cowbell') {
     // ковбелл как у 808: два квадрата 540 и 800 Гц через полосовой фильтр
     const bp = ctx.createBiquadFilter(), g = ctx.createGain();
@@ -278,6 +327,26 @@ function resample(d, f) {
 }
 
 /** Эхо (реверберация): свёртка с затухающим шумом; одинаковый «зал» в превью и экспорте. */
+/** Дилей «пинг-понг»: повторы по долям темпа, каждый тише (обратная связь 0.4), поочерёдно влево/вправо. */
+function addDelay(buf, wet, time) {
+  const sr = buf.sampleRate, n = buf.length, ch = buf.numberOfChannels;
+  const src = Array.from({ length: ch }, (_, c) => buf.getChannelData(c).slice());
+  const out = new AudioBuffer({ length: n, numberOfChannels: Math.max(2, ch), sampleRate: sr });
+  const dst = Array.from({ length: out.numberOfChannels }, (_, c) => { const d = out.getChannelData(c); d.set(src[Math.min(c, ch - 1)]); return d; });
+  const step = Math.round(time * sr);
+  let g = wet;
+  for (let k = 1; k <= 8 && g > 0.01; k++, g *= 0.4) {
+    const off = step * k;
+    for (let c = 0; c < dst.length; c++) {
+      // пинг-понг: нечётные повторы больше слева, чётные — справа
+      const side = (k % 2 === 1) === (c === 0) ? 1 : 0.35;
+      const s = src[Math.min(c, ch - 1)], d = dst[c], gg = g * side;
+      for (let i = off; i < n; i++) d[i] += s[i - off] * gg;
+    }
+  }
+  return out;
+}
+
 async function addReverb(buf, amt) {
   const sr = buf.sampleRate, tail = Math.round(sr * 2.6);
   const ctx = new OfflineAudioContext(2, buf.length, sr);

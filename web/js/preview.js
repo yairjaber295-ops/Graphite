@@ -9,7 +9,9 @@ import { settings } from './backend/index.js';
 import { hasCurve, speedAt } from './engine/speed.js';
 import { adGain, guessKeyColor, insertsIn } from './engine/ads.js';
 import { hasAfx, makeChain, setChain } from './engine/afx.js';
+import { censorGain, censorBeep, BEEP_HZ, BEEP_GAIN } from './engine/censor.js';
 import { audioLen, audioSpeed, processedBuffer } from './engine/audioproc.js';
+import { showMusicStage } from './musicstage.js';
 
 let canvas = document.getElementById('preview');
 const ui = document.getElementById('preview-ui');
@@ -203,7 +205,10 @@ export function draw() {
     }
     return;
   }
-  empty.hidden = p.clips.length > 0;
+  // только музыка — вместо пустого кадра экран плеера (обложка, пресеты, спектр)
+  const musicOnly = !p.clips.length && ((p.audio || []).length > 0 || p.kind === 'music');
+  empty.hidden = p.clips.length > 0 || musicOnly;
+  showMusicStage(musicOnly);
   const ins = curInsert();
   const spec = ins ? insertFrame(ins.x, ins.age) : frameAt(S.t, { withCover: !S.playing });
   const taken = new Set();
@@ -366,8 +371,9 @@ export function seek(t) {
 }
 
 export function play() {
-  if (S.playing || !S.project.clips.length) return;
+  if (S.playing || !duration()) return;   // проект только из музыки тоже играет
   if (S.t >= duration() - frame()) S.t = 0;
+  if (S.loopRange && (S.t < S.loopRange.a || S.t >= S.loopRange.b)) S.t = S.loopRange.a;
   // стоим ровно на вставке (или она показана) — сначала ролик
   const at = peek && Math.abs(S.t - peek.x.start) < 1e-3 ? peek : null;
   const x0 = at?.x || insertsIn(S.t - 0.02, S.t + 0.02)[0];
@@ -386,6 +392,22 @@ export function play() {
   emit('play-state');
 }
 
+/** «Пик» на мате в превью: один генератор, громкость 0 ↔ BEEP_GAIN. */
+let beepGain = null;
+function setBeep(on) {
+  if (!on && !beepGain) return;
+  const ctx = audioCtx();
+  if (!beepGain) {
+    const o = ctx.createOscillator();
+    o.frequency.value = BEEP_HZ;
+    beepGain = ctx.createGain();
+    beepGain.gain.value = 0;
+    o.connect(beepGain).connect(ctx.destination);
+    o.start();
+  }
+  beepGain.gain.setTargetAtTime(on ? BEEP_GAIN : 0, ctx.currentTime, 0.004);
+}
+
 function tick() {
   const now = performance.now();
   if (insert && (now - insert.p0) / 1000 >= insert.x.end - insert.x.start) {
@@ -399,6 +421,12 @@ function tick() {
     const x = insertsIn(S.t + 1e-4, t + 1e-4)[0];
     if (x) { t = x.start; insert = { x, p0: now }; stopMusic(); }
   }
+  // цикл участка: дошли до конца — снова с начала участка
+  if (S.loopRange && t >= S.loopRange.b) {
+    t = S.loopRange.a;
+    clock = { t0: t, p0: now };
+    startMusic(t);
+  }
   if (t >= duration()) {
     stopPlayback();
     S.t = duration();
@@ -410,7 +438,7 @@ function tick() {
   const spec = draw();
   const used = new Set();
   const sync = [
-    ...spec.layers.map((l) => ({ v: l.el, hold: !!spec.frozen || !!l.clip.freeze, muted: hasCurve(l.clip), gain: clipGain(l.clip, t), afx: l.clip.afx, rate: clamp(speedAt(l.clip, t - l.clip.start), 0.0625, 16), want: srcTime(l.clip, t) })),
+    ...spec.layers.map((l) => ({ v: l.el, hold: !!spec.frozen || !!l.clip.freeze, muted: hasCurve(l.clip), gain: clipGain(l.clip, t) * censorGain(t), afx: l.clip.afx, rate: clamp(speedAt(l.clip, t - l.clip.start), 0.0625, 16), want: srcTime(l.clip, t) })),
     ...spec.ads.map((ad) => ({ v: ad.el, muted: false, gain: adGain({ start: 0, end: ad.end - ad.start }, ad.age), rate: ad.speed || 1, want: ad.want })),
   ];
   for (const { v, hold, muted, gain, afx, rate, want } of sync) {
@@ -437,6 +465,7 @@ function tick() {
       v.currentTime = want; // отстал или убежал — подтягиваем
     }
   }
+  setBeep(censorBeep(t));
   // заранее готовим клипы, которые начнутся через ~0,4 с
   const ahead = frameAt(Math.min(duration() - 0.01, t + 0.4), { withCover: false });
   const taken = new Set(used);
@@ -461,6 +490,7 @@ export function stopPlayback() {
   if (insert) peek = { x: insert.x, age: Math.max(0, (performance.now() - insert.p0) / 1000) };
   insert = null;
   S.playing = false;
+  setBeep(false);
   cancelAnimationFrame(raf);
   for (const list of Object.values(pool)) for (const v of list) { v.pause(); v.muted = true; v.playbackRate = 1; }
   stopMusic();
@@ -484,6 +514,26 @@ export function audioCtx() {
   return actx;
 }
 
+/** Общий выход музыки: через него идёт спектр для экрана плеера (проект «Музыка»). */
+let musicBus = null;
+function musicOut() {
+  const ctx = audioCtx();
+  if (!musicBus) {
+    const input = ctx.createGain();
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 2048;
+    analyser.smoothingTimeConstant = 0.78;
+    // лимитер: несколько дорожек вместе (мешап, бит + голос) не хрипят
+    const lim = ctx.createDynamicsCompressor();
+    lim.threshold.value = -3; lim.knee.value = 4; lim.ratio.value = 20; lim.attack.value = 0.002; lim.release.value = 0.15;
+    input.connect(lim).connect(ctx.destination);
+    input.connect(analyser);
+    musicBus = { input, analyser };
+  }
+  return musicBus.input;
+}
+export function musicAnalyser() { musicOut(); return musicBus.analyser; }
+
 /** Декодированный звук (музыка/звук/звуковая дорожка видео для поиска битов). */
 export function decoded(mid) {
   const m = mediaOf(mid);
@@ -492,11 +542,30 @@ export function decoded(mid) {
   return decodedCache[mid];
 }
 
+/** Щелчок метронома (сильная доля — выше). */
+export function click(ctx, when, accent = false) {
+  const o = ctx.createOscillator(), g = ctx.createGain();
+  o.frequency.value = accent ? 1600 : 1050;
+  g.gain.setValueAtTime(0.0001, when);
+  g.gain.exponentialRampToValueAtTime(accent ? 0.5 : 0.32, when + 0.002);
+  g.gain.exponentialRampToValueAtTime(0.0001, when + 0.05);
+  o.connect(g).connect(ctx.destination);
+  o.start(when); o.stop(when + 0.06);
+  return o;
+}
+
 async function startMusic(t) {
   stopMusic();
-  const items = (S.project.audio || []).filter((it) => !it.muted && it.start + audioLen(it) > t);
-  if (!items.length) return;
   const ctx = audioCtx();
+  // метроном по темпу проекта — щелчки на каждую долю до конца (или до конца цикла)
+  if (S.metro && S.project.bpm) {
+    if (ctx.state === 'suspended') await ctx.resume();
+    const beat = 60 / S.project.bpm, end = Math.min(S.loopRange?.b ?? duration(), t + 600);
+    for (let i = Math.ceil(t / beat - 1e-6); i * beat < end; i++) playing.push(click(ctx, ctx.currentTime + (i * beat - t), i % 4 === 0));
+  }
+  const solo = (S.project.audio || []).some((it) => it.solo && !it.muted);
+  const items = (S.project.audio || []).filter((it) => !it.muted && (!solo || it.solo) && it.start + audioLen(it) > t);
+  if (!items.length) return;
   if (ctx.state === 'suspended') await ctx.resume();
   const startedAt = ctx.currentTime, tStart = t;
   for (const it of items) {
@@ -520,8 +589,8 @@ async function startMusic(t) {
       g.gain.setValueAtTime(itemGain(it, st), when);
       for (const x of pts.slice(1)) g.gain.linearRampToValueAtTime(itemGain(it, x), when + (x - st));
     }
-    if (hasAfx(it.afx)) { const ch = setChain(makeChain(ctx), it.afx); node.connect(g).connect(ch.input); ch.output.connect(ctx.destination); }
-    else node.connect(g).connect(ctx.destination);
+    if (hasAfx(it.afx)) { const ch = setChain(makeChain(ctx), it.afx); node.connect(g).connect(ch.input); ch.output.connect(musicOut()); }
+    else node.connect(g).connect(musicOut());
     node.start(when, it.in / audioSpeed(it) + (st - it.start), end - st);
     playing.push(node);
   }
