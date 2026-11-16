@@ -15,7 +15,7 @@ import { hydrateIcons, svg } from './icons.js';
 import { applyTo, defaultProfile, allProfiles } from './profiles.js';
 import { THEMES, currentTheme, applyTheme } from './themes.js';
 import { sendReport, reportText } from './diag.js';
-import './contextmenu.js'; // меню по правому клику на таймлайне и в кадре
+import { openSelectionMenu } from './contextmenu.js'; // меню по правому клику / долгому нажатию на таймлайне и в кадре
 
 applyTheme(); // до первого рендера — без мигания
 
@@ -86,11 +86,10 @@ function buildMobileBar() {
     if (['clip', 'text', 'effect', 'audio', 'mixed'].includes(kind)) items.push(b('split', 'Разрезать', splitAtPlayhead));
     if (kind === 'clip' && single) items.push(b('transition', 'Переход', () => { setTab('transitions'); openSheet('panel'); }));
     if (['text', 'effect', 'audio', 'mixed'].includes(kind)) items.push(b('copy', 'Копия', duplicateSelection));
+    if (single && ['clip', 'text', 'effect', 'audio'].includes(kind)) items.push(b('more', 'Ещё', openSelectionMenu));
+    items.push(multi);                                   // «Несколько» доступно сразу из выбранного клипа
+    if (S.multi) items.push(b('sparkles', 'Все', selectAll));
     items.push(b('trash', 'Удалить', () => { deleteSelection(); closeSheets(); }, false, 'danger'));
-    if (S.multi || kind === 'mixed') {   // режим «Несколько» включается с главной ленты; здесь — выключить или выбрать всё
-      items.push(multi);
-      if (S.multi) items.push(b('sparkles', 'Все', selectAll));
-    }
   } else {
     for (const [tab, icon, label] of tabList()) {
       items.push(b(icon, label, () => { setTab(tab); openSheet('panel'); }, opened('panel') && currentTab() === tab));

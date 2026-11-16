@@ -646,13 +646,13 @@ cv.addEventListener('pointerdown', (e) => {
     // режим «Несколько»: палец по пустому месту рисует рамку — выделяется всё, что она задела
     if (S.playing) stopPlayback();
     op = { kind: 'marquee', add: true, base: selItems() };
-  } else if (touch && centered() && (['empty', 'parts', 'ruler'].includes(h.type) || (!already && ['clip', 'text', 'effect', 'audio'].includes(h.type)))) {
-    // палец по пустому месту или по невыделенному элементу — прокрутка ленты (как в CapCut);
-    // в режиме «Несколько» касание добавляет объект к выделению
-    if (h.id && h.type !== 'trans' && h.type !== 'header') select(h.type, [h.id], !!S.multi);
-    else if (h.type !== 'ruler' && !S.multi) select(null);
+  } else if (touch && centered() && (['empty', 'parts', 'ruler'].includes(h.type) || (!already && ['clip', 'text', 'effect', 'audio'].includes(h.type)) || (already && h.type === 'clip' && !h.edge))) {
+    // палец по пустому месту или по клипу — прокрутка ленты (как в CapCut); плейхед при этом не прыгает.
+    // Выделение — по короткому тапу (при отпускании), в режиме «Несколько» тап добавляет/снимает объект.
+    const tapSel = h.id && h.type !== 'trans' && h.type !== 'header' ? { type: h.type, id: h.id } : null;
+    if (!tapSel && h.type !== 'ruler' && !S.multi) select(null);
     if (S.playing) stopPlayback();
-    op = { kind: 'pan', t: S.t, x: e.clientX };
+    op = { kind: 'pan', t: S.t, x: e.clientX, tapSel };
   } else if (h.type === 'empty' && !touch) {
     // пустое место дорожек: клик — перемотка, протяжка — рамка выделения
     if (S.playing) stopPlayback();
@@ -723,8 +723,22 @@ cv.addEventListener('pointerdown', (e) => {
   request();
   if (!op) return;
 
+  // долгое нажатие пальцем на клипе/тексте/эффекте/звуке — меню действий (как правый клик на компе)
+  let lp = null;
+  if (touch && ['clip', 'text', 'effect', 'audio'].includes(h.type) && !h.edge) {
+    lp = setTimeout(() => {
+      lp = null;
+      op.dead = true;
+      if (S.playing) stopPlayback();
+      navigator.vibrate?.(20);
+      emit('long-press', { x: e.clientX, y: e.clientY });
+    }, 450);
+  }
+
   let moved = false;
   const onMove = (ev) => {
+    if (lp && Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) > 8) { clearTimeout(lp); lp = null; }
+    if (op.dead) return;
     pointers.set(ev.pointerId, ev);
     if (pointers.size >= 2 && pinch) {
       const [a, b] = [...pointers.values()];
@@ -831,6 +845,14 @@ cv.addEventListener('pointerdown', (e) => {
     cv.removeEventListener('pointermove', onMove);
     cv.removeEventListener('pointerup', onUp);
     cv.removeEventListener('pointercancel', onUp);
+    if (lp) { clearTimeout(lp); lp = null; }
+    if (op.dead) {   // сработало долгое нажатие — жест уже отдан меню
+      S.marquee = null; S.clipDrag = null;
+      if (!['scrub', 'pan', 'marquee', 'clip-move'].includes(op.kind)) endEdit();
+      request();
+      return;
+    }
+    if (op.kind === 'pan' && !moved && op.tapSel) select(op.tapSel.type, [op.tapSel.id], !!S.multi);
     if (op.kind === 'marquee') {
       if (moved && S.marquee) {
         selectItems(marqueeItems(op));

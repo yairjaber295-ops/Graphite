@@ -1,6 +1,6 @@
 // Меню по правому клику (на телефоне — долгое нажатие) на таймлайне и в кадре:
 // быстрые действия с тем, что под курсором — звук (бас, «телефон»…), скорость, фильтр, хромакей, переход, эффект.
-import { S, commit, select, emit, isSelected, uid, fmtTime, CHROMA_DEFAULTS } from './store.js';
+import { S, commit, select, emit, on, isSelected, uid, fmtTime, CHROMA_DEFAULTS } from './store.js';
 import { h, toast } from './ui.js';
 import { splitAtPlayhead, deleteSelection, duplicateSelection, setClipSpeed, setTransition, addEffect, addText, addCut, clipStart, rippleInsert, freezeFrame, setFreezeDur } from './edit.js';
 import { seek, hitAt, keyColorOf, peekAd } from './preview.js';
@@ -17,6 +17,14 @@ import { openEnhance } from './enhanceui.js';
 
 let cur = null;
 export function closeMenu() { cur?.remove(); cur = null; }
+const menuOpen = () => !!cur;
+// Меню от долгого нажатия появляется под пальцем: пока палец не отпущен (и ещё мгновение после), клики по строкам игнорируются —
+// иначе отпускание «нажмёт» строку, которая оказалась под пальцем.
+let armed = false, armTimer = 0;
+const disarm = () => { clearTimeout(armTimer); armTimer = setTimeout(() => { armed = false; }, 350); };
+addEventListener('pointerup', () => { if (armed) disarm(); }, true);
+addEventListener('pointercancel', () => { if (armed) disarm(); }, true);
+const tooSoon = () => armed;
 
 /** items: [{label, action, hint?, on?, danger?, sub?: [...]}, '-' (разделитель), null (пропуск)]. */
 export function openMenu(x, y, items) {
@@ -24,7 +32,7 @@ export function openMenu(x, y, items) {
   const build = (list) => h('div', { class: 'ctx-menu' }, ...list.filter(Boolean).map((it) => {
     if (it === '-') return h('div', { class: 'ctx-sep' });
     if (it.sub) {
-      const row = h('div', { class: 'ctx-item has-sub', onclick: (e) => { e.stopPropagation(); row.classList.toggle('open'); } },
+      const row = h('div', { class: 'ctx-item has-sub', onclick: (e) => { e.stopPropagation(); if (tooSoon()) return; row.classList.toggle('open'); } },
         h('span', {}, it.label), h('span', { class: 'ctx-arrow' }, '›'));
       const sub = build(it.sub);
       sub.classList.add('ctx-sub');
@@ -39,13 +47,18 @@ export function openMenu(x, y, items) {
       row.addEventListener('click', fit);
       return row;
     }
-    return h('div', { class: 'ctx-item' + (it.on ? ' on' : '') + (it.danger ? ' danger' : ''), onclick: (e) => { e.stopPropagation(); closeMenu(); it.action(); } },
+    return h('div', { class: 'ctx-item' + (it.on ? ' on' : '') + (it.danger ? ' danger' : ''), onclick: (e) => { e.stopPropagation(); if (tooSoon()) return; closeMenu(); it.action(); } },
       h('span', {}, it.label), it.hint ? h('span', { class: 'ctx-hint' }, it.hint) : null);
   }));
   const m = build(items);
   m.classList.add('ctx-root');
   if (x > innerWidth - 440) m.classList.add('flip'); // подменю — влево, если справа нет места
   document.body.append(m);
+  if (S.mobile) {   // на телефоне меню — панель снизу с крупными строками
+    m.classList.add('ctx-sheet');
+    cur = m;
+    return;
+  }
   const r = m.getBoundingClientRect();
   m.style.left = Math.max(6, Math.min(x, innerWidth - r.width - 6)) + 'px';
   m.style.top = Math.max(6, Math.min(y, innerHeight - r.height - 6)) + 'px';
@@ -221,9 +234,30 @@ function menuFor(hit, t) {
   }
 }
 
+let lpAt = 0;
+// долгое нажатие пальцем (таймер в timeline.js): надёжнее, чем событие contextmenu, которое в Android WebView приходит не всегда
+on('long-press', ({ x, y }) => {
+  if (!S.project) return;
+  const hit = hitAtClient(x, y);
+  if (hit.type === 'ruler') return;
+  lpAt = Date.now();
+  openMenu(x, y, menuFor(hit, hit.t));
+  armed = true;                                   // палец ещё на экране
+  clearTimeout(armTimer); armTimer = setTimeout(() => { armed = false; }, 8000);   // на всякий случай
+});
+
+/** Кнопка «Ещё» в нижней панели: те же действия для выбранного клипа/текста/звука/эффекта. */
+export function openSelectionMenu() {
+  const { kind, ids } = S.sel;
+  if (!S.project || ids.length !== 1 || !['clip', 'text', 'effect', 'audio'].includes(kind)) return;
+  lpAt = Date.now();
+  openMenu(0, 0, menuFor({ type: kind, id: ids[0] }, S.t));
+}
+
 document.getElementById('tl').addEventListener('contextmenu', (e) => {
   if (!S.project) return;
   e.preventDefault();
+  if (Date.now() - lpAt < 1500 || menuOpen()) return;   // меню уже открыто долгим нажатием
   const hit = hitAtClient(e.clientX, e.clientY);
   if (hit.type === 'ruler') return;
   openMenu(e.clientX, e.clientY, menuFor(hit, hit.t));
