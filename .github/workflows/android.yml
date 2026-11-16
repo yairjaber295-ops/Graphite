@@ -1,13 +1,17 @@
 # Сборка Android-приложения (Graphite.apk) на серверах GitHub — компьютер не нужен.
 # Те же шаги, что в tools/build_android.ps1, только на Linux.
 # Запуск: вкладка Actions → «Android APK» → Run workflow (или сам при пуше в ветку footage-ai).
-# Готовый файл: внизу страницы запуска, раздел Artifacts → Graphite-apk (внутри Graphite.apk).
+# Готовый файл: раздел Releases репозитория → «Graphite APK (последняя сборка)» → Graphite.apk
+# (запасной вариант: внизу страницы запуска, раздел Artifacts → Graphite-apk).
 name: Android APK
 
 on:
   workflow_dispatch:
   push:
     branches: [footage-ai]
+
+permissions:
+  contents: write
 
 jobs:
   apk:
@@ -84,3 +88,13 @@ jobs:
           name: Graphite-apk
           path: dist-out/Graphite.apk
           retention-days: 30
+
+      - name: Выложить в Releases (скачать с телефона одним нажатием)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete apk-latest --cleanup-tag --yes -R "$GITHUB_REPOSITORY" || true
+          gh release create apk-latest dist-out/Graphite.apk -R "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" --prerelease \
+            --title "Graphite APK (последняя сборка)" \
+            --notes "Собрано из коммита ${GITHUB_SHA::7}, ветка ${GITHUB_REF_NAME}. Скачай Graphite.apk и установи."
