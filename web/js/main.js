@@ -42,19 +42,30 @@ function openSheet(which) {
   $('panel').classList.toggle('open', which === 'panel');
   $('inspector').classList.toggle('open', which === 'inspector');
   $('sheet-back').classList.toggle('open', !!which);
+  document.body.classList.toggle('sheet-open', !!which);   // шторка занимает низ экрана, превью и курсор остаются видны
   buildMobileBar();
 }
 function closeSheets() { openSheet(null); }
 $('sheet-back').addEventListener('click', closeSheets);
+$('sheet-close').addEventListener('click', closeSheets);
 on('open-inspector', () => openSheet('inspector'));
 on('open-panel', () => { if (S.mobile) openSheet('panel'); });
 // включили/выключили тестовую функцию — перерисовать то, где она видна
 on('labs-changed', () => { if (!$('home').hidden) showHome(); else renderPanel(); });
+on('add-media', () => importMedia('video').catch((e) => toast(e.message, 'err')));   // «+» в конце дорожки видео на таймлайне
 
+/**
+ * Нижняя панель телефона (как в CapCut) меняется по контексту:
+ *  • ничего не выбрано — главные инструменты (Медиа, Аудио, Текст…);
+ *  • выбран клип / текст / звук / эффект — только действия с ним; «Назад» снимает выбор.
+ */
 function buildMobileBar() {
   const bar = $('mobile-bar');
-  if (!S.mobile || !S.project) { bar.replaceChildren(); return; }
-  const b = (icon, label, fn, on = false) => h('button', { class: on ? 'on' : '', onclick: fn, html: svg(icon, 22) + `<span>${label}</span>` });
+  if (!S.mobile || !S.project) { bar.replaceChildren(); delete bar.dataset.mode; return; }
+  const b = (icon, label, fn, on = false, cls = '') => h('button', { class: [cls, on ? 'on' : ''].filter(Boolean).join(' '), onclick: fn, html: svg(icon, 24) + `<span>${label}</span>` });
+  const opened = (id) => $(id).classList.contains('open');
+  const kind = S.sel.kind;
+  const single = S.sel.ids.length === 1;
   const items = [];
   // «Несколько»: касания добавляют объекты к выделению
   const multi = b('check', S.multi ? `Выбрано ${S.sel.ids.length}` : 'Несколько', () => {
@@ -62,27 +73,39 @@ function buildMobileBar() {
     if (!S.multi && S.sel.ids.length > 1) select(null);
     buildMobileBar();
   }, S.multi);
-  if (S.sel.kind) {
-    items.push(multi);
-    items.push(b('edit', 'Изменить', () => { renderInspector(); openSheet('inspector'); }, $('inspector').classList.contains('open')));
-    if (S.sel.kind === 'clip' && S.sel.ids.length === 1) {
+  if (kind) {
+    items.push(b('back', 'Назад', () => { S.multi = false; select(null); closeSheets(); }, false, 'mb-back'));
+    items.push(b('edit', 'Изменить', () => { renderInspector(); openSheet('inspector'); }, opened('inspector')));
+    if (kind === 'clip' && single) {
       items.push(b('speed', 'Скорость', () => {
         renderInspector();
         openSheet('inspector');
         setTimeout(() => document.getElementById('insp-speed')?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 50);
       }));
     }
-    if (['clip', 'text', 'effect', 'audio', 'mixed'].includes(S.sel.kind)) items.push(b('split', 'Разрезать', splitAtPlayhead));
-    if (['text', 'effect', 'audio', 'mixed'].includes(S.sel.kind)) items.push(b('copy', 'Копия', duplicateSelection));
-    items.push(b('trash', 'Удалить', () => { deleteSelection(); closeSheets(); }));
-    if (S.multi) items.push(b('sparkles', 'Все', selectAll));
-    items.push(h('div', { class: 'sep' }));
+    if (['clip', 'text', 'effect', 'audio', 'mixed'].includes(kind)) items.push(b('split', 'Разрезать', splitAtPlayhead));
+    if (kind === 'clip' && single) items.push(b('transition', 'Переход', () => { setTab('transitions'); openSheet('panel'); }));
+    if (['text', 'effect', 'audio', 'mixed'].includes(kind)) items.push(b('copy', 'Копия', duplicateSelection));
+    items.push(b('trash', 'Удалить', () => { deleteSelection(); closeSheets(); }, false, 'danger'));
+    if (S.multi || kind === 'mixed') {   // режим «Несколько» включается с главной ленты; здесь — выключить или выбрать всё
+      items.push(multi);
+      if (S.multi) items.push(b('sparkles', 'Все', selectAll));
+    }
   } else {
+    for (const [tab, icon, label] of tabList()) {
+      items.push(b(icon, label, () => { setTab(tab); openSheet('panel'); }, opened('panel') && currentTab() === tab));
+    }
+    items.push(h('div', { class: 'sep' }));
     items.push(b('split', 'Разрезать', splitAtPlayhead));
     items.push(multi);
   }
-  for (const [tab, icon, label] of tabList()) {
-    items.push(b(icon, label, () => { setTab(tab); openSheet('panel'); }, $('panel').classList.contains('open') && currentTab() === tab));
+  const mode = kind ? `sel:${kind}` : 'root';
+  if (bar.dataset.mode !== mode) {   // сменился контекст — лента возвращается к началу и плавно появляется заново
+    bar.dataset.mode = mode;
+    bar.scrollLeft = 0;
+    bar.style.animation = 'none';
+    void bar.offsetWidth;
+    bar.style.animation = '';
   }
   bar.replaceChildren(...items);
 }

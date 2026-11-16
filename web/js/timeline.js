@@ -13,7 +13,8 @@ import { audioLen, audioSpeed, audioSrcAt, audioTlOf } from './engine/audioproc.
 const body = document.getElementById('tl-body');
 const cv = document.getElementById('tl');
 const ctx = cv.getContext('2d');
-const RULER = 26, EDGE = 8;
+const RULER = 26;
+let EDGE = 8;   // зона захвата края клипа: на телефоне шире — под палец
 let ACC = '#7c5cff';
 /** Акцентный цвет темы с прозрачностью. */
 const accA = (a) => { const n = parseInt(ACC.slice(1, 7), 16); return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`; };
@@ -79,6 +80,7 @@ export function resize() {
   dpr = window.devicePixelRatio || 1;
   W = r.width; H = r.height;
   LEFT = S.mobile ? 8 : 84;
+  EDGE = S.mobile ? 14 : 8;
   cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
   cv.style.width = W + 'px'; cv.style.height = H + 'px';
   request();
@@ -348,6 +350,16 @@ function drawVideo(r) {
     ctx.lineWidth = sel ? 2 : 1;
     ctx.stroke();
     ctx.lineWidth = 1;
+    if (sel && w > 40) {
+      // у выбранного клипа края — белые ручки, за которые тянут (как в CapCut)
+      const hw = S.mobile ? 13 : 8;
+      for (const hx of [x + 1, x + w - hw - 1]) {
+        rr(hx, r.y + 3, hw, r.h - 6, 6);
+        ctx.fillStyle = '#fff'; ctx.fill();
+        ctx.fillStyle = 'rgba(20,20,26,.75)';
+        rr(hx + hw / 2 - 1, r.y + r.h / 2 - 8, 2, 16, 1); ctx.fill();
+      }
+    }
     // переход в этот клип — ромбик на стыке
     if (j > 0) {
       const bx = X(c.start), by = transY(r); // ромбик внизу, над волной — середина стыка остаётся для краёв клипов
@@ -366,6 +378,23 @@ function drawVideo(r) {
       ctx.restore();
     }
   });
+  const pb = plusBtn(r);
+  if (pb && pb.x < W) {
+    // «+» в конце дорожки: добавить ещё видео или фото
+    rr(pb.x, pb.y, pb.s, pb.s, 10);
+    ctx.fillStyle = 'rgba(255,255,255,.92)'; ctx.fill();
+    ctx.strokeStyle = '#111'; ctx.lineWidth = 2.2; ctx.lineCap = 'round';
+    const cx = pb.x + pb.s / 2, cy = pb.y + pb.s / 2;
+    ctx.beginPath(); ctx.moveTo(cx - 7, cy); ctx.lineTo(cx + 7, cy); ctx.moveTo(cx, cy - 7); ctx.lineTo(cx, cy + 7); ctx.stroke();
+    ctx.lineWidth = 1; ctx.lineCap = 'butt';
+  }
+}
+
+/** Кнопка «+» после последнего клипа (только на телефоне). */
+function plusBtn(r) {
+  if (!S.mobile || !S.project.clips.length) return null;
+  const s = Math.min(r.h - 6, 46);
+  return { x: X(duration()) + 10, y: r.y + (r.h - s) / 2, s };
 }
 
 /** Высота ромбика перехода на дорожке видео: внизу, над полосой звуковой волны. */
@@ -459,6 +488,8 @@ function hitTest(mx, my) {
   }
   if (r.key === 'video') {
     const list = clipsTL();
+    const pb = plusBtn(r);
+    if (pb && mx >= pb.x - 6 && mx <= pb.x + pb.s + 6 && my >= pb.y - 6 && my <= pb.y + pb.s + 6) return { type: 'addmedia', row: r };
     // ромбик перехода
     for (let j = 1; j < list.length; j++) {
       if (Math.abs(mx - X(list[j].start)) <= 7 && Math.abs(my - transY(r)) <= 8) return { type: 'trans', id: list[j].id, row: r };
@@ -631,6 +662,8 @@ cv.addEventListener('pointerdown', (e) => {
     if (S.playing) stopPlayback();
     seek(Math.max(0, snapPlayhead(t0)));
     op = { kind: 'scrub' };
+  } else if (h.type === 'addmedia') {
+    emit('add-media');
   } else if (h.type === 'trans') {
     select('clip', [h.id]);
     emit('edit-transition', h.id);

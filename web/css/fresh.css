@@ -1,0 +1,225 @@
+/* Graphite — свежий вид. Подключается после app.css и меняет только оформление:
+   цвета берутся из переменных темы, поэтому работает во всех темах («Графит» по умолчанию обновлён сильнее всего).
+   Поведение и раскладка (кроме телефона) не трогаются. */
+
+/* ---------- палитра «Графит»: глубже, мягче, тёплый оранжевый ---------- */
+:root[data-theme="graphite"] {
+  --bg: #0a0a0c; --bg-2: #0f0f12; --surface: #141417; --surface-2: #1a1a1e; --surface-3: #232328;
+  --line: rgba(255, 255, 255, .06); --line-2: rgba(255, 255, 255, .11);
+  --text: #f5f5f7; --muted: #9b9ba6; --faint: #63636e;
+  --accent: #ff7b2e; --accent-2: #ffb347; --accent-text: #ffc8a1;
+  --grad: linear-gradient(135deg, #ff9a45 0%, #ff5b2e 100%);
+  --hover: #2c2c32; --tl-bg: #0d0d10; --scroll: #2e2e35;
+  --hero-grad: linear-gradient(90deg, #ffffff 20%, #ffd2b2 100%);
+  --r: 14px; --r-sm: 11px;
+}
+:root {
+  --glass: color-mix(in srgb, var(--bg-2) 74%, transparent);
+  --glow: 0 10px 28px -10px color-mix(in srgb, var(--accent) 60%, transparent);
+  --ease: cubic-bezier(.2, .8, .25, 1);
+  --shadow-s: 0 6px 18px rgba(0, 0, 0, .28);
+}
+
+/* ---------- фон и мелочи ---------- */
+body::before {
+  background:
+    radial-gradient(640px 360px at 8% -8%, color-mix(in srgb, var(--accent) 17%, transparent), transparent 62%),
+    radial-gradient(520px 420px at 105% 108%, color-mix(in srgb, var(--accent-2) 9%, transparent), transparent 62%);
+}
+::selection { background: color-mix(in srgb, var(--accent) 40%, transparent); }
+.btn, .icon-btn, .chip, .tile, .tabs button, .seg button, .project-card, .qs-tile { transition: background .16s var(--ease), border-color .16s var(--ease), transform .16s var(--ease), box-shadow .16s var(--ease), color .16s; }
+
+/* ---------- кнопки, поля ---------- */
+.btn { border-radius: var(--r-sm); padding: 8px 14px; font-weight: 600; background: var(--surface-2); border-color: var(--line-2); }
+.btn:hover { background: var(--surface-3); border-color: rgba(255, 255, 255, .2); }
+.btn.primary { box-shadow: var(--glow), inset 0 1px 0 rgba(255, 255, 255, .28); }
+.btn.primary:hover { transform: translateY(-1px); filter: brightness(1.06); }
+.btn.big { border-radius: 14px; padding: 12px 22px; }
+.icon-btn { border-radius: 11px; }
+.chip { background: var(--glass); backdrop-filter: blur(10px); padding: 6px 13px 6px 10px; font-weight: 600; }
+.chip:hover { border-color: color-mix(in srgb, var(--accent) 55%, transparent); transform: translateY(-1px); }
+.chip.accent { background: color-mix(in srgb, var(--accent) 16%, var(--surface-2)); border-color: color-mix(in srgb, var(--accent) 45%, transparent); color: var(--accent-text); }
+input[type=text], input[type=number], input[type=url], input[type=search], textarea, select { border-radius: var(--r-sm); background: var(--surface-2); }
+input:focus, textarea:focus, select:focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
+.seg { border-radius: 999px; padding: 3px; background: var(--surface-2); }
+.seg button { border-radius: 999px; padding: 7px 8px; font-weight: 600; }
+.seg button.on { background: var(--surface-3); box-shadow: 0 1px 6px rgba(0, 0, 0, .35), inset 0 1px 0 rgba(255, 255, 255, .08); }
+.note { line-height: 1.5; }
+.badge { border-radius: 999px; }
+
+/* ползунки: тонкая дорожка и круглая ручка — удобно и мышью, и пальцем */
+input[type=range] { -webkit-appearance: none; appearance: none; height: 22px; background: transparent; cursor: pointer; }
+input[type=range]::-webkit-slider-runnable-track { height: 4px; border-radius: 4px; background: var(--surface-3); }
+input[type=range]::-moz-range-track { height: 4px; border-radius: 4px; background: var(--surface-3); }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; margin-top: -7px; border-radius: 50%; border: 0;
+  background: #fff; box-shadow: 0 1px 6px rgba(0, 0, 0, .5), 0 0 0 4px color-mix(in srgb, var(--accent) 0%, transparent); transition: box-shadow .15s; }
+input[type=range]:active::-webkit-slider-thumb, input[type=range]:focus-visible::-webkit-slider-thumb { box-shadow: 0 1px 6px rgba(0, 0, 0, .5), 0 0 0 6px color-mix(in srgb, var(--accent) 30%, transparent); }
+input[type=range]::-moz-range-thumb { width: 18px; height: 18px; border-radius: 50%; border: 0; background: #fff; box-shadow: 0 1px 6px rgba(0, 0, 0, .5); }
+.check input { border-radius: 5px; }
+
+/* ---------- главный экран ---------- */
+.home { padding-top: 0; }
+.home-top { position: sticky; top: 0; z-index: 20; margin: 0 -40px; padding: calc(14px + var(--safe-t)) 40px 12px;
+  background: linear-gradient(180deg, var(--bg) 55%, transparent); }
+.brand { font-size: 20px; }
+.hero { position: relative; margin: 18px 0 26px; padding: 30px 32px; border-radius: 26px; overflow: hidden; align-items: center;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 20%, var(--surface)) 0%, var(--surface) 55%, var(--surface-2) 100%);
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--line-2)); box-shadow: var(--shadow-s); }
+.hero::after { content: ''; position: absolute; width: 360px; height: 360px; right: -90px; top: -150px; border-radius: 50%; pointer-events: none;
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 38%, transparent), transparent 68%); }
+.hero > * { position: relative; z-index: 1; }
+.hero h1 { font-size: 34px; letter-spacing: -.025em; }
+.hero p { font-size: 14px; line-height: 1.55; }
+.home-sec-title { font-size: 11.5px; letter-spacing: .1em; color: var(--faint); }
+.quick-start { grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); gap: 12px; }
+.qs-tile { border-radius: 18px; padding: 13px 14px; gap: 12px; font-weight: 600; background: var(--surface); }
+.qs-tile .type-ic { width: 40px; height: 40px; border-radius: 13px; color: #fff; background: var(--grad); box-shadow: var(--glow); }
+.qs-tile:hover { transform: translateY(-3px); border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: var(--surface-2); }
+.type-ic { border-radius: 13px; }
+.home-search { border-radius: 999px; padding: 8px 16px; background: var(--surface); }
+.project-list { gap: 18px; grid-template-columns: repeat(auto-fill, minmax(236px, 1fr)); }
+.project-card { border-radius: 22px; background: var(--surface); border-color: var(--line); box-shadow: var(--shadow-s); }
+.project-card:hover { transform: translateY(-4px); box-shadow: 0 22px 44px -18px rgba(0, 0, 0, .75), 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
+.pc-poster { aspect-ratio: 4 / 3; }
+.pc-body { padding: 13px 15px 15px; }
+.project-card .pc-name { font-size: 15px; font-weight: 700; letter-spacing: -.01em; }
+.pc-dur, .pc-kind, .pc-ready { border-radius: 999px; }
+.home-empty { border-radius: 24px; background: color-mix(in srgb, var(--surface) 60%, transparent); }
+
+/* ---------- редактор на компе ---------- */
+.topbar { background: var(--glass); backdrop-filter: blur(18px) saturate(1.2); }
+.name-input { border-radius: 11px; }
+.tabs { width: 80px; padding: 8px 7px; gap: 2px; background: var(--bg-2); }
+.tabs button { position: relative; padding: 4px 0 4px; gap: 3px; border-radius: 14px; font-weight: 600; }
+.tabs button .icon { width: 34px; height: 24px; border-radius: 10px; transition: background .16s; }
+.tabs button:hover { background: transparent; }
+.tabs button:hover .icon { background: var(--surface-2); }
+.tabs button.active { background: transparent; color: var(--text); }
+.tabs button.active .icon { background: var(--grad); color: #fff; box-shadow: var(--glow); }
+.tabs button.active .icon svg { filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .25)); }
+.panel, .inspector { background: var(--surface); }
+.panel h3, .inspector h3 { color: var(--faint); letter-spacing: .1em; }
+.panel h4, .inspector h4 { font-weight: 700; }
+.frame-wrap { border-radius: 16px; box-shadow: 0 0 0 1px var(--line-2), 0 30px 60px -20px rgba(0, 0, 0, .8); }
+.stage-empty { border-radius: 26px; }
+.play-btn { background: #fff; color: #0b0b0d; box-shadow: 0 6px 22px rgba(255, 255, 255, .16); }
+.tc { font-weight: 600; letter-spacing: .02em; }
+.resizer { height: 8px; position: relative; background: var(--bg-2); }
+.resizer::after { content: ''; position: absolute; left: 50%; top: 2px; width: 44px; height: 4px; margin-left: -22px; border-radius: 3px; background: var(--line-2); transition: background .15s; }
+.resizer:hover::after { background: var(--accent); }
+.tl-toolbar { gap: 4px; padding: 0 12px; height: 46px; }
+.tool { border-radius: 11px; padding: 6px 11px; font-weight: 600; color: var(--muted); }
+.tool:hover { color: var(--text); background: var(--surface-3); }
+.tool svg { color: var(--text); }
+.tile, .profile, .preset, .font-item, .media-item, .theme-card, .type-card { border-radius: 15px; }
+.tile.on, .profile.on { box-shadow: 0 0 0 1px var(--accent) inset, var(--glow); }
+.tile .sw { border-radius: 12px; }
+
+/* ---------- окна, меню, уведомления ---------- */
+.modal-back { backdrop-filter: blur(10px) saturate(1.1); background: rgba(4, 4, 8, .6); }
+.modal { border-radius: 26px; padding: 24px 26px; box-shadow: 0 40px 90px -20px rgba(0, 0, 0, .85), 0 0 0 1px var(--line); animation: rise .24s var(--ease); }
+@keyframes rise { from { transform: translateY(14px) scale(.985); opacity: 0; } }
+.modal h2 { font-size: 20px; letter-spacing: -.02em; }
+.toast { border-radius: 999px; padding: 11px 20px; font-weight: 600; backdrop-filter: blur(14px); }
+.ctx-menu { border-radius: 16px; padding: 6px; }
+.ctx-item { border-radius: 10px; padding: 8px 11px; }
+
+/* ---------- «Футажи и ИИ» ---------- */
+.ft-card { border-radius: 16px; }
+.ft-card img { border-radius: 11px; }
+.ft-card .cat { border-radius: 999px; backdrop-filter: blur(6px); }
+.ft-status { border-radius: 14px; }
+.modal.ft-modal { border-radius: 28px; }
+
+/* =====================================================================
+   ТЕЛЕФОН: управление как в CapCut
+   • внизу одна панель, меняется по контексту (инструменты ↔ действия с выбранным);
+   • панели эффектов, текста и свойств — шторка в нижней части экрана, превью остаётся видно;
+   • крупные зоны нажатия.
+   ===================================================================== */
+body.mobile { --bar-h: 66px; --sheet-h: min(42vh, 400px); }
+body.mobile .home { padding-left: 16px; padding-right: 16px; }
+body.mobile .home-top { margin: 0 -16px; padding: calc(10px + var(--safe-t)) 16px 10px; }
+body.mobile .brand { font-size: 18px; }
+body.mobile .home-top .chip > span:last-child { display: none; }       /* в шапке на телефоне только значки */
+body.mobile .home-top .chip { padding: 8px 10px; }
+body.mobile .hero { padding: 20px 18px 18px; margin: 8px 0 20px; border-radius: 24px; flex-direction: column; align-items: stretch; gap: 16px; }
+body.mobile .hero h1 { font-size: 26px; }
+body.mobile .hero p { font-size: 13px; }
+body.mobile .hero .btn { width: 100%; min-height: 50px; font-size: 15px; }
+body.mobile .quick-start { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+body.mobile .qs-tile { padding: 12px; border-radius: 16px; min-height: 64px; }
+body.mobile .qs-tile .type-ic { width: 36px; height: 36px; }
+body.mobile .project-list { gap: 12px; }
+body.mobile .project-card { border-radius: 18px; }
+body.mobile .pc-poster { aspect-ratio: 3 / 4; }
+body.mobile .pc-body { padding: 10px 12px 12px; }
+body.mobile .project-card .pc-name { font-size: 14px; }
+body.mobile .pc-actions .icon-btn { width: 32px; height: 32px; }
+
+/* верхняя панель редактора */
+body.mobile .topbar { height: calc(52px + var(--safe-t)); padding-left: 6px; padding-right: 8px; gap: 4px; }
+body.mobile .icon-btn { width: 40px; height: 40px; }
+body.mobile #btn-export { height: 38px; border-radius: 999px; padding: 0 14px; }
+body.mobile #btn-export .lbl { display: inline; }
+body.mobile #btn-schedule { display: none; }
+body.mobile .name-input { font-size: 15px; }
+
+/* превью и управление воспроизведением */
+body.mobile .stage { padding: 6px 10px 2px; }
+body.mobile .frame-wrap { border-radius: 14px; }
+body.mobile .transport { height: 56px; padding: 0 10px; gap: 4px; }
+body.mobile .play-btn { width: 46px; height: 46px; }
+body.mobile .transport .icon-btn { width: 42px; height: 42px; }
+body.mobile .tc { font-size: 12.5px; }
+body.mobile .timeline { border-top: 1px solid var(--line); border-radius: 20px 20px 0 0; overflow: hidden; }
+
+/* нижняя панель: одна лента, содержимое меняется по контексту */
+body.mobile .mobile-bar { height: calc(var(--bar-h) + var(--safe-b)); padding: 4px 6px var(--safe-b); gap: 0; align-items: stretch;
+  background: var(--glass); backdrop-filter: blur(18px); border-top: 1px solid var(--line-2); scroll-snap-type: x proximity; animation: bar-in .22s var(--ease); }
+@keyframes bar-in { from { opacity: .4; transform: translateY(8px); } }
+.mobile-bar button { min-width: 72px; padding: 4px 4px 3px; gap: 4px; font-size: 11px; font-weight: 600; border-radius: 14px; justify-content: center; scroll-snap-align: start; }
+.mobile-bar button .ic { width: 24px; height: 24px; }
+.mobile-bar button.on { color: var(--accent-text); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.mobile-bar button:active { transform: scale(.94); background: var(--surface-2); }
+.mobile-bar button.danger { color: #ff7a8e; }
+.mobile-bar button.mb-back { min-width: 56px; color: var(--text); }
+.mobile-bar button.mb-back .ic { width: 22px; height: 22px; padding: 7px; box-sizing: content-box; border-radius: 50%; background: var(--surface-3); }
+.mobile-bar .sep { margin: 12px 6px; }
+
+/* шторка: нижние ~45% экрана; превью и курсор остаются видны, фон не затемняется */
+body.mobile .sheet { height: var(--sheet-h); max-height: none; border-radius: 24px 24px 0 0; padding: 26px 14px calc(18px + var(--safe-b));
+  background: var(--surface); box-shadow: 0 -24px 60px rgba(0, 0, 0, .55), 0 -1px 0 var(--line-2); overscroll-behavior: contain; }
+body.mobile .sheet::before { top: 9px; width: 44px; height: 5px; margin-left: -22px; background: var(--line-2); }
+body.mobile .sheet-back { display: none !important; }
+.sheet-close { display: none; }
+body.mobile.sheet-open .sheet-close { display: inline-flex; position: fixed; z-index: 70; right: 12px; bottom: calc(var(--sheet-h) - 40px); width: 36px; height: 36px;
+  align-items: center; justify-content: center; border-radius: 50%; border: 1px solid var(--line-2); cursor: pointer;
+  background: var(--surface-3); color: var(--text); box-shadow: var(--shadow-s); }
+body.mobile.sheet-open .sheet-close:active { transform: scale(.92); }
+body.mobile .sheet .panel-head, body.mobile .sheet h3:first-child { padding-right: 44px; }
+body.mobile .tile-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+body.mobile .tile { min-height: 76px; border-radius: 14px; }
+body.mobile .btn { min-height: 42px; }
+body.mobile .btn.big { min-height: 50px; }
+body.mobile .seg button { padding: 10px 6px; font-size: 13px; }
+body.mobile .check input { width: 20px; height: 20px; }
+body.mobile input[type=range] { height: 30px; }
+body.mobile input[type=range]::-webkit-slider-runnable-track { height: 5px; }
+body.mobile input[type=range]::-webkit-slider-thumb { width: 24px; height: 24px; margin-top: -9.5px; }
+body.mobile .modal { border-radius: 26px; padding: 20px; max-height: 92vh; }
+body.mobile .modal-back { align-items: flex-end; padding: 0; }
+body.mobile .modal-back > .modal { width: 100%; max-width: 100%; border-radius: 26px 26px 0 0; animation: sheet-up .28s var(--ease); padding-bottom: calc(20px + var(--safe-b)); }
+body.mobile .modal-back > .modal.ft-modal { height: 94vh; border-radius: 26px 26px 0 0; }
+@keyframes sheet-up { from { transform: translateY(40px); opacity: 0; } }
+body.mobile .toasts { bottom: calc(var(--bar-h) + 18px + var(--safe-b)); }
+
+/* главный экран на телефоне: поиск и сортировка отдельными строками */
+body.mobile .home-tools { gap: 8px; margin-bottom: 14px; }
+body.mobile .home-tools .home-sec-title { flex: 1 1 100%; }
+body.mobile .home-search { flex: 1 1 100%; min-height: 42px; }
+body.mobile #home-sort { flex: 1 1 100%; }
+body.mobile #home-sort .seg { width: 100%; }
+body.mobile #home-sort .seg button { flex: 1; }
+/* выбран объект: все действия помещаются на экран без прокрутки */
+.mobile-bar[data-mode^="sel"] button { flex: 1 0 60px; min-width: 60px; }

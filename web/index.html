@@ -13,6 +13,7 @@
 <link rel="alternate icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="css/fresh.css">
 <script type="importmap">
 { "imports": { "mediabunny": "./vendor/mediabunny.min.mjs", "mediabunny-aac": "./vendor/mediabunny-aac-encoder.min.mjs", "mediabunny-mp3": "./vendor/mediabunny-mp3-encoder.min.mjs" } }
 </script>
@@ -24,7 +25,7 @@
   <div class="home-top">
     <div class="brand"><img class="brand-logo" src="icons/logo.svg" alt=""><span>Graphite</span></div>
     <div class="spacer"></div>
-    <button class="chip" id="btn-footage" hidden><span data-icon="film"></span><span>Футажи и ИИ</span></button>
+    <button class="chip accent" id="btn-footage" hidden><span data-icon="sparkles"></span><span>Футажи и ИИ</span></button>
     <button class="chip" id="btn-publish" hidden><span data-icon="upload"></span><span>Публикации</span></button>
     <button class="chip" id="btn-phone" hidden><span data-icon="phone"></span><span id="phone-label">Комп</span></button>
     <button class="icon-btn" id="btn-settings-home" title="Настройки"><span data-icon="settings"></span></button>
@@ -133,6 +134,7 @@
 </div>
 
 <div id="sheet-back" class="sheet-back"></div>
+<button id="sheet-close" class="sheet-close" title="Закрыть"><span data-icon="x"></span></button>
 <div id="modal-root"></div>
 <div id="toasts" class="toasts"></div>
 <div id="videos" hidden></div>
