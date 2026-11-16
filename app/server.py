@@ -25,7 +25,9 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import ai  # noqa: E402
 import fonts  # noqa: E402
+import footage  # noqa: E402
 import jobs  # noqa: E402
 import media  # noqa: E402
 import tls  # noqa: E402
@@ -236,6 +238,114 @@ def adlib_use(pid, eid):
 def adlib_remove(eid):
     # файл не трогаем: на него могут ссылаться проекты
     write_json(ADLIB, [x for x in read_json(ADLIB, []) or [] if x['id'] != eid])
+
+
+# ----------------------------------------------------------------------------
+#   Футажи и ИИ-режиссёр: библиотека роликов/фонов с описаниями (app/footage.py) и сборка видео по тексту (app/ai.py).
+#   ИИ выбирает футажи по описаниям, сервер собирает из них обычный проект — дальше он правится в редакторе.
+# ----------------------------------------------------------------------------
+CANVAS = {'9:16': (1080, 1920), '16:9': (1920, 1080), '1:1': (1080, 1080), '4:5': (1080, 1350)}
+STYLE_BASE = {'font': 'Rubik-700', 'size': 62, 'color': '#FFFFFF', 'strokeColor': '#000000', 'strokeWidth': 7,
+              'shadowColor': '#000000', 'shadowAlpha': 0.45, 'shadowDist': 5, 'box': False, 'boxColor': '#000000',
+              'boxAlpha': 0.65, 'boxPad': 18, 'upper': False, 'wrap': 18}   # как STYLE_BASE в web/js/store.js
+
+
+def footage_describe_job(job, ids, overwrite=False):
+    done = 0
+    errors = []
+    for i, eid in enumerate(ids):
+        job.check_cancel()
+        e = footage.get(eid)
+        if not e or not os.path.isfile(e.get('path', '')):
+            continue
+        job.update(i / max(1, len(ids)), f'{i + 1} из {len(ids)}: {e.get("name", "")}')
+        try:
+            r = ai.describe(footage.frames_for_ai(e), hint='' if overwrite else e.get('description', ''))
+        except ai.AIError as ex:
+            errors.append(f'{e.get("name", "")}: {ex}')
+            if len(errors) >= 3:
+                break   # ключ неверный или кончились деньги — нет смысла гонять остальные
+            continue
+        upd = {'tags': sorted(set(e.get('tags') or []) | set(footage.parse_tags(r['tags'])), key=str.lower)[:30]}
+        if overwrite or not e.get('description'):
+            upd['description'] = r['description']
+        if overwrite or not e.get('title') or e['title'] == os.path.splitext(e.get('name', ''))[0][:120]:
+            upd['title'] = r['title'] or e.get('title')
+        footage.update(eid, upd)
+        done += 1
+    if errors and not done:
+        raise RuntimeError(errors[0])
+    return {'done': done, 'errors': errors}
+
+
+def footage_background_job(job, prompt, vertical=True):
+    prompt = (prompt or '').strip()
+    if len(prompt) < 3:
+        raise ValueError('опиши, какой нужен фон')
+    job.update(0.1, 'ИИ рисует фон…')
+    png = ai.generate_image(prompt, vertical)
+    words = prompt.split()
+    return footage.add_generated(png, ' '.join(words[:6])[:80], prompt, ['сгенерирован'], prompt)
+
+
+def footage_compose_job(job, o):
+    brief = (o.get('brief') or '').strip()
+    if len(brief) < 3:
+        raise ValueError('опиши, какое видео нужно')
+    target = max(5.0, min(180.0, float(o.get('duration') or 30)))
+    allow_new = max(0, min(4, int(o.get('new_backgrounds') or 0))) if ai.image_ready() else 0
+    cw, ch = CANVAS.get(o.get('aspect'), CANVAS['9:16'])
+    entries = footage.catalog_for_brief(brief)
+    if not entries and not allow_new:
+        raise ValueError('В библиотеке нет футажей — сначала добавь их во вкладке «Футажи»')
+    job.update(0.05, 'ИИ подбирает футажи…')
+    plan = ai.plan_video(brief, entries, target, allow_new)
+    scenes, warns = ai.clean_plan(plan, {e['id']: e for e in entries}, target, allow_new)
+    # новые фоны: рисуем и кладём в библиотеку, чтобы потом использовать снова
+    made = 0
+    for k, s in enumerate(list(scenes)):
+        if 'new_background' not in s:
+            continue
+        job.check_cancel()
+        job.update(0.2 + 0.4 * made / max(1, allow_new), 'ИИ рисует фон…')
+        try:
+            png = ai.generate_image(s['new_background'], ch >= cw)
+            s['entry'] = footage.add_generated(png, ' '.join(s['new_background'].split()[:6]), s['new_background'], ['сгенерирован'], s['new_background'])
+            made += 1
+        except ai.AIError as ex:
+            warns.append(f'Фон не нарисовался: {ex}')
+            scenes.remove(s)
+    if not scenes:
+        raise ValueError('Не получилось собрать сцены. ' + str(plan.get('notes') or ''))
+    scenes = [dict(s, transition=('none' if i == 0 else s['transition'])) for i, s in enumerate(scenes)]
+    job.update(0.65, 'Собираю проект…')
+    title = str(plan.get('title') or brief)[:80].strip() or 'Видео из футажей'
+    data = create_project(title)
+    pid = data['id']
+    items, clips, texts, t = {}, [], [], 0.0
+    for s in scenes:
+        e = s['entry']
+        if e['id'] not in items:
+            items[e['id']] = dict(add_media(pid, e['path'], e['name']), footage=e['id'])
+        m = items[e['id']]
+        a, b = s['in'], s['out']
+        w, h = m.get('width') or cw, m.get('height') or ch
+        fit = (ch * w) / (cw * h)                       # во сколько раз кадр шире окна по высоте
+        scale = max(1.0, fit) if o.get('fit') == 'cover' else min(1.0, fit)
+        clip = {'id': uuid.uuid4().hex[:12], 'media': m['id'], 'in': a, 'out': b, 'speed': 1, 'volume': 1, 'scale': round(scale, 4)}
+        if s['transition'] != 'none':
+            clip['transition'] = {'type': s['transition'], 'dur': ai.TRANSITIONS[s['transition']]}
+        clips.append(clip)
+        if s['text']:
+            texts.append({'id': uuid.uuid4().hex[:12], 'track': 'text', 'text': s['text'], 'start': round(t, 3),
+                          'end': round(t + (b - a), 3), 'x': cw // 2, 'y': round(ch * 0.74),
+                          'style': dict(STYLE_BASE, size=62 if ch >= cw else 54), 'anim': {'in': 'pop', 'out': 'fade', 'dur': 220}})
+        t += b - a
+    data.update({'title': title, 'canvas': {'w': cw, 'h': ch}, 'media': list(items.values()), 'clips': clips, 'texts': texts,
+                 'aiBrief': brief})
+    save_project(pid, data)
+    return {'pid': pid, 'name': title, 'scenes': len(clips), 'duration': round(t, 1), 'generated': made,
+            'notes': str(plan.get('notes') or '')[:600], 'warnings': warns}
 
 
 def prepare_media_job(job, pid, mid):
@@ -748,6 +858,38 @@ class Handler(BaseHTTPRequestHandler):
             path = os.path.join(path, 'index.html')
         return self.send_file(path)
 
+    def footage_post(self, p, b):
+        """Футажи и ИИ. Пути к файлам на компе и ключи ИИ — только из окна на компе."""
+        local_only = ('import', 'catalog', 'ai')
+        if p and p[0] in local_only and not self.local:
+            return self.send_error_json(403, 'только на компе')
+        if p == ['import']:
+            paths = [x for x in b.get('paths') or [] if os.path.exists(x)]
+            if not paths:
+                return self.send_error_json(400, 'не выбрано ни одного файла')
+            return self.send_json(jobs.start('footage', None, 'Добавление футажей', footage.import_paths, paths, b.get('category', 'footage')).to_dict())
+        if p == ['catalog']:
+            footage.parse_catalog(b.get('text'))   # ошибки в формате — сразу, а не после запуска
+            return self.send_json(jobs.start('footage', None, 'Описания футажей', footage.import_catalog, b.get('text'),
+                                             b.get('folder') or '', b.get('category', 'footage')).to_dict())
+        if p == ['update']:
+            return self.send_json(footage.public(footage.update(b['id'], b), self.local))
+        if p == ['remove']:
+            footage.remove(b['id'])
+            return self.send_json({'ok': True})
+        if p == ['ai']:
+            return self.send_json(ai.save_config(b))
+        if p == ['describe']:
+            ids = [i for i in b.get('ids') or [] if footage.get(i)]
+            if not ids:
+                return self.send_error_json(400, 'нечего описывать')
+            return self.send_json(jobs.start('footage', None, 'ИИ описывает футажи', footage_describe_job, ids, bool(b.get('overwrite'))).to_dict())
+        if p == ['background']:
+            return self.send_json(jobs.start('footage', None, 'ИИ рисует фон', footage_background_job, b.get('prompt'), b.get('vertical', True)).to_dict())
+        if p == ['compose']:
+            return self.send_json(jobs.start('footage', None, 'ИИ собирает видео', footage_compose_job, b).to_dict())
+        self.send_error_json(404, 'not found')
+
     def api_get(self, p, q):
         if p == ['projects']:
             return self.send_json(list_projects())
@@ -765,6 +907,13 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(fonts.catalog())
         if p == ['adlib']:
             return self.send_json(adlib_list(self.local))
+        if p == ['footage']:
+            return self.send_json({'items': footage.list_all(self.local), 'categories': footage.CATEGORIES,
+                                   'ai': ai.public_config() if self.local else {'ready': ai.public_config()['ready'], 'image_ready': ai.image_ready()}})
+        if p[0] == 'footage' and len(p) == 3 and p[1] in ('thumb', 'file'):
+            e = footage.get(p[2])
+            path = footage.thumb(p[2]) if p[1] == 'thumb' else (e or {}).get('path')
+            return self.send_file(path, cache=p[1] == 'thumb') if path else self.send_error_json(404, 'нет файла')
         if p == ['pair']:
             if not self.local:
                 return self.send_error_json(403, 'только на компе')
@@ -830,6 +979,17 @@ class Handler(BaseHTTPRequestHandler):
                     f.write(chunk)
                     left -= len(chunk)
             return self.send_json(add_media(pid, path))
+        if p == ['footage', 'upload']:
+            def _write(f):
+                left = int(self.headers.get('Content-Length') or 0)
+                while left > 0:
+                    chunk = self.rfile.read(min(1 << 20, left))
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    left -= len(chunk)
+            return self.send_json(footage.public(footage.save_upload(q.get('name', ['file'])[0], _write, q.get('category', ['footage'])[0]),
+                                                 self.local))
         if p == ['log']:
             # журнал ошибок и возможности телефона — чтобы разбирать проблемы на телефоне с компа
             d = os.path.join(ROOT, 'logs')
@@ -904,6 +1064,8 @@ class Handler(BaseHTTPRequestHandler):
         if p == ['adlib', 'remove']:
             adlib_remove(b['id'])
             return self.send_json({'ok': True})
+        if p[:1] == ['footage']:
+            return self.footage_post(p[1:], b)
         if p == ['transcribe']:
             j = jobs.start('transcribe', b['pid'], 'Распознавание речи', transcribe_job, b['pid'], b['mid'],
                            b.get('lang', 'ru'), b.get('model', 'large-v3-turbo'))

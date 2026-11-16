@@ -7,7 +7,7 @@ export class ServerBackend {
     this.base = base.replace(/\/$/, '');
     this.key = key;
     this.kind = base ? 'remote' : 'pc';
-    this.caps = { transcribe: true, proxies: true, saveToDisk: true, uploader: !base, openFolder: !base, pickPaths: !base, enhance: true };
+    this.caps = { transcribe: true, proxies: true, saveToDisk: true, uploader: !base, openFolder: !base, pickPaths: !base, enhance: true, footage: true };
   }
 
   url(path) {

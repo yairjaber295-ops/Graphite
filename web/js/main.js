@@ -209,6 +209,7 @@ function renderModeBar() {
   const bar = $('mode-bar');
   const phoneBtn = $('btn-phone');
   $('btn-publish').hidden = !env.desktopApp;
+  $('btn-footage').hidden = !S.backend?.caps.footage;
   $('btn-schedule').hidden = !S.backend?.caps.uploader;
   if (env.desktopApp) {
     bar.hidden = true;
@@ -558,6 +559,9 @@ $('btn-settings').onclick = settingsDialog;
 $('project-name').addEventListener('change', (e) => commit((p) => { p.name = e.target.value.trim() || p.name; p.autoName = false; }));
 on('project-renamed', () => { if (S.project) $('project-name').value = S.project.name; });
 $('btn-publish').onclick = () => import('./publish.js').then((m) => m.publishDialog());
+$('btn-footage').onclick = () => import('./footageui.js').then((m) => m.footageDialog());
+// ИИ-режиссёр собрал проект из футажей — открыть его в редакторе
+on('open-project', (pid) => openProject(pid).catch((e) => toast(e.message, 'err')));
 $('btn-schedule').onclick = async () => { await save(); import('./publish.js').then((m) => m.publishDialog({ project: S.project })); };
 $('btn-import-empty').onclick = () => importMedia('video').catch((e) => toast(e.message, 'err'));
 $('btn-prev').onclick = ACT.prevPart;

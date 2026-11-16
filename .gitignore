@@ -20,6 +20,9 @@ ad_library/*
 !ad_library/.gitkeep
 !ad_library/library.json
 
+# Библиотека футажей (файлы, описания, миниатюры — личные данные)
+footage_library/
+
 output/
 logs/
 _enhance_tmp/
