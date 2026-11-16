@@ -59,8 +59,11 @@ input[type=range]::-moz-range-thumb { width: 18px; height: 18px; border-radius: 
 
 /* ---------- главный экран ---------- */
 .home { padding-top: 0; }
+body.mobile .home { padding-top: 0; }   /* отступ под статус-бар уже есть в .home-top — иначе он удваивается и сверху остаётся дыра */
 .home-top { position: sticky; top: 0; z-index: 20; margin: 0 -40px; padding: calc(14px + var(--safe-t)) 40px 12px;
-  background: linear-gradient(180deg, var(--bg) 55%, transparent); }
+  background: var(--bg); }                 /* непрозрачная — иначе контент просвечивает сквозь кнопки */
+.home-top::after { content: ''; position: absolute; left: 0; right: 0; top: 100%; height: 16px; pointer-events: none;
+  background: linear-gradient(180deg, var(--bg), transparent); }
 .brand { font-size: 20px; }
 .hero { position: relative; margin: 18px 0 26px; padding: 30px 32px; border-radius: 26px; overflow: hidden; align-items: center;
   background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 20%, var(--surface)) 0%, var(--surface) 55%, var(--surface-2) 100%);
