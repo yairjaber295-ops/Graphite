@@ -1,0 +1,86 @@
+# Сборка Android-приложения (Graphite.apk) на серверах GitHub — компьютер не нужен.
+# Те же шаги, что в tools/build_android.ps1, только на Linux.
+# Запуск: вкладка Actions → «Android APK» → Run workflow (или сам при пуше в ветку footage-ai).
+# Готовый файл: внизу страницы запуска, раздел Artifacts → Graphite-apk (внутри Graphite.apk).
+name: Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [footage-ai]
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '21' }
+
+      - uses: android-actions/setup-android@v3
+        with: { packages: 'platform-tools platforms;android-36 build-tools;36.0.0' }
+
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+
+      - name: Python-зависимости для сборки файлов приложения
+        run: pip install pillow numpy
+
+      - name: Проект Capacitor
+        run: |
+          mkdir -p "$RUNNER_TEMP/proj" && cd "$RUNNER_TEMP/proj"
+          echo '{ "name": "narezchik", "version": "2.0.0", "private": true }' > package.json
+          npm install --no-audit --no-fund @capacitor/core@8.5.3 @capacitor/cli@8.5.3 @capacitor/android@8.5.3 @capacitor/filesystem@8.1.4 @capacitor/share@8.0.3
+          cat > capacitor.config.json <<'JSON'
+          {
+            "appId": "ru.narezchik.app",
+            "appName": "Graphite",
+            "webDir": "www",
+            "server": { "androidScheme": "https" },
+            "android": { "allowMixedContent": true }
+          }
+          JSON
+          python -I "$GITHUB_WORKSPACE/tools/build_www.py" "$RUNNER_TEMP/proj/www"
+          npx cap add android
+          npx cap sync android
+
+      - name: Права, название и иконки
+        run: |
+          cd "$RUNNER_TEMP/proj"
+          python - <<'PY'
+          import re
+          man = 'android/app/src/main/AndroidManifest.xml'
+          x = open(man, encoding='utf-8').read()
+          if 'usesCleartextTraffic' not in x:      # подключение к компу по http в домашней сети
+              x = x.replace('<application', '<application android:usesCleartextTraffic="true"', 1)
+          if 'RECORD_AUDIO' not in x:              # запись голоса в проекте «Музыка»
+              x = x.replace('<application', '<uses-permission android:name="android.permission.RECORD_AUDIO" />\n    '
+                            '<uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />\n    <application', 1)
+          open(man, 'w', encoding='utf-8').write(x)
+          st = 'android/app/src/main/res/values/strings.xml'
+          s = open(st, encoding='utf-8').read()
+          s = re.sub(r'(<string name="app_name">)[^<]*', r'\1Graphite', s)
+          s = re.sub(r'(<string name="title_activity_main">)[^<]*', r'\1Graphite', s)
+          open(st, 'w', encoding='utf-8').write(s)
+          PY
+          python -I "$GITHUB_WORKSPACE/tools/android_icons.py" android/app/src/main/res
+
+      - name: Сборка APK
+        working-directory: ${{ runner.temp }}/proj/android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Положить APK
+        run: |
+          mkdir -p dist-out
+          cp "$RUNNER_TEMP/proj/android/app/build/outputs/apk/debug/app-debug.apk" dist-out/Graphite.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Graphite-apk
+          path: dist-out/Graphite.apk
+          retention-days: 30
