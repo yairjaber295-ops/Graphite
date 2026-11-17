@@ -4,6 +4,7 @@ import { S, clipsTL, renderItems, parts, seriesTitle } from '../store.js';
 import { TRANSITIONS, evalEffects } from './effects.js';
 import { srcOffset } from './speed.js';
 import { adsAt, adDuck, adState } from './ads.js';
+import { pipsAt } from './pips.js';
 
 const mediaDur = (mid) => S.project.media.find((m) => m.id === mid)?.duration ?? Infinity;
 
@@ -100,13 +101,14 @@ export function frameAt(t, { withCover = true } = {}) {
   const { layers, trans } = layersAt(t);
   const card = cardAt(t);
   const ads = adsAt(t);
+  const pips = pipsAt(t);
   // пока карточка (или реклама, если так настроено) на экране, субтитры и заголовок не мешают
   const hide = (card && S.project.covers.card.hideSubs !== false) || (ads.length && S.project.ads.hideSubs);
   return {
     t,
     layers,
     trans,
-    ads,
+    ads: [...pips, ...ads],   // наложения (снизу вверх), потом реклама — экспорт берёт кадры в этом же порядке
     bg: S.project.background,
     fx: evalEffects(S.project.effects, t),
     texts: renderItems().filter((it) => t >= it.start && t < it.end && String(it.text).trim() && !(hide && (it.kind === 'sub' || it.kind === 'header')))

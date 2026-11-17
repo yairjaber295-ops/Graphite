@@ -1,6 +1,6 @@
 // Таймлайн на canvas: части, тексты, заголовки, субтитры, эффекты, видео (миниатюры + волна + переходы),
 // музыка/звуки (волна + биты). На телефоне курсор закреплён по центру, лента двигается пальцем.
-import { S, on, emit, isMusic, clipsTL, duration, parts, renderItems, freeTexts, select, isSelected, selItems, selectItems,
+import { S, on, emit, commit, isMusic, clipsTL, duration, parts, renderItems, freeTexts, select, isSelected, selItems, selectItems,
   beginEdit, updateEdit, endEdit, snapFrame, clamp, fmtTime } from './store.js';
 import { setClipIn, setClipOut, mediaDuration, addCut, clipStart, setFreezeDur, moveClip } from './edit.js';
 import { seek, stopPlayback, peekAd } from './preview.js';
@@ -8,6 +8,7 @@ import { EFFECTS } from './engine/effects.js';
 import { transitionDur } from './engine/frame.js';
 import { clipDur, srcOffset, hasCurve, isSped, CURVES } from './engine/speed.js';
 import { adPlacements } from './engine/ads.js';
+import { pipEnd, pipSpeed, fixTracks } from './engine/pips.js';
 import { audioLen, audioSpeed, audioSrcAt, audioTlOf } from './engine/audioproc.js';
 
 const body = document.getElementById('tl-body');
@@ -18,7 +19,7 @@ let EDGE = 8;   // зона захвата края клипа: на телеф�
 let ACC = '#7c5cff';
 /** Акцентный цвет темы с прозрачностью. */
 const accA = (a) => { const n = parseInt(ACC.slice(1, 7), 16); return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`; };
-const C = { sub: '#4b7bec', header: '#e8a33d', text: '#a26bf5', part: '#7c5cff', audio: '#1fb58f', sfx: '#f0b429', voice: '#3fb4e8', ad: '#e8457a' };
+const C = { sub: '#4b7bec', header: '#e8a33d', text: '#a26bf5', part: '#7c5cff', audio: '#1fb58f', sfx: '#f0b429', voice: '#3fb4e8', ad: '#e8457a', pip: '#c2410c' };
 let LEFT = 84;
 let W = 0, H = 0, dpr = 1;
 let rows = [];
@@ -42,6 +43,9 @@ function lanes(items) {
   return { count: ends.length, lane };
 }
 const audioItems = () => (S.project.audio || []).map((a) => ({ ...a, end: a.start + audioLen(a) }));
+const pipItems = () => (S.project.pips || []).map((x) => ({ ...x, end: pipEnd(x) }));
+const pipTracks = () => (S.project.pips || []).reduce((n, x) => Math.max(n, (x.track || 0) + 1), 0);
+const pipName = (x) => S.project.media.find((m) => m.id === x.media)?.name || 'Наложение';
 
 function layout() {
   const tl = lanes(freeTexts());
@@ -63,6 +67,9 @@ function layout() {
   add('subs', 26, 'Субтитры');
   for (let i = 0; i < Math.max(1, fl.count); i++) add('effects', 24, i ? '' : 'Эффекты', { lane: i });
   if (adPlacements().length) add('ads', 22, 'Реклама');
+  // наложения: верхний слой — верхняя дорожка (как в CapCut), сразу над основным видео
+  const np = pipTracks();
+  for (let i = np - 1; i >= 0; i--) add('pip', 30, i === np - 1 ? 'Наложение' : '', { lane: i });
   // только музыка: пустой ряд видео узкий, волна песни — крупная
   const musicOnly = !S.project.clips.length && (S.project.audio || []).length > 0;
   const n = Math.max(1, al.count);
@@ -197,6 +204,14 @@ function draw() {
     const r = rows.find((x) => x.key === 'audio' && x.lane === L.al.lane[a.id]);
     if (r) drawAudio(a, r);
   }
+  for (const x of pipItems()) {
+    if (x.end < t0 || x.start > t1) continue;
+    const r = rows.find((y) => y.key === 'pip' && y.lane === (x.track || 0));
+    if (!r) continue;
+    const kind = S.project.media.find((m) => m.id === x.media)?.kind;
+    drawBlock(x.start, x.end, r, C.pip, `${kind === 'image' ? '🖼' : '🎬'} ${pipName(x)}`, isSelected('pip', x.id));
+    if (isSelected('pip', x.id)) drawHandles(x.start, x.end, r);
+  }
   const adRow = rows.find((x) => x.key === 'ads');
   if (adRow) {
     for (const x of adPlacements()) {
@@ -260,6 +275,19 @@ function drawBlock(s, e, r, color, text, sel, fx = false) {
   ctx.fill();
   if (sel) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke(); ctx.lineWidth = 1; }
   label(text, x, r.y + r.h / 2, w, fx && color === '#ffffff' ? '#222' : '#fff');
+}
+
+/** Белые ручки по краям выделенного блока (тянуть — обрезка). */
+function drawHandles(s, e, r) {
+  const x = X(s), w = (e - s) * S.zoom;
+  if (w < 30) return;
+  const hw = S.mobile ? 12 : 7;
+  for (const hx of [x + 1, x + w - hw - 1]) {
+    rr(hx, r.y + 3, hw, r.h - 6, 5);
+    ctx.fillStyle = '#fff'; ctx.fill();
+    ctx.fillStyle = 'rgba(20,20,26,.75)';
+    rr(hx + hw / 2 - 1, r.y + r.h / 2 - 6, 2, 12, 1); ctx.fill();
+  }
 }
 
 function drawParts(r) {
@@ -503,6 +531,10 @@ function hitTest(mx, my) {
     const e = S.project.effects.find((x) => fl.lane[x.id] === r.lane && within(x.start, x.end));
     return e ? { type: 'effect', id: e.id, edge: edgeOf(e.start, e.end), row: r } : { type: 'empty', row: r };
   }
+  if (r.key === 'pip') {
+    const x = pipItems().find((y) => (y.track || 0) === r.lane && within(y.start, y.end));
+    return x ? { type: 'pip', id: x.id, edge: edgeOf(x.start, x.end), row: r } : { type: 'empty', row: r };
+  }
   if (r.key === 'ads') {
     const ad = adPlacements().find((x) => within(x.start, x.end));
     // правый край — длина ролика (тянуть)
@@ -548,6 +580,7 @@ function snapPoints(exclude = [], withPlayhead = true) {
   for (const it of renderItems()) if (!exclude.includes(it.id)) pts.push(it.start, it.end);
   for (const e of S.project.effects) if (!exclude.includes(e.id)) pts.push(e.start, e.end);
   for (const a of audioItems()) if (!exclude.includes(a.id)) pts.push(a.start, a.end);
+  for (const x of pipItems()) if (!exclude.includes(x.id)) pts.push(x.start, x.end);
   return pts;
 }
 
@@ -584,6 +617,7 @@ function itemsInRect(x0, x1, y0, y1) {
   }
   for (const e of S.project.effects) if (overlaps(e.start, e.end) && hitRow(rows.find((x) => x.key === 'effects' && x.lane === fl.lane[e.id]))) out.push({ kind: 'effect', id: e.id });
   for (const a of audioItems()) if (overlaps(a.start, a.end) && hitRow(rows.find((x) => x.key === 'audio' && x.lane === al.lane[a.id]))) out.push({ kind: 'audio', id: a.id });
+  for (const x of pipItems()) if (overlaps(x.start, x.end) && hitRow(rows.find((y) => y.key === 'pip' && y.lane === (x.track || 0)))) out.push({ kind: 'pip', id: x.id });
   if (hitRow(rows.find((x) => x.key === 'video'))) for (const c of clipsTL()) if (overlaps(c.start, c.end)) out.push({ kind: 'clip', id: c.id });
   return out;
 }
@@ -610,6 +644,17 @@ const movable = {
       else if (edge === 'r') { x.out = clamp(o.out + (e - o.e) * sp, x.in + 0.1, md); }
       else x.start = s;
     } },
+  // наложение: края обрезают отрезок исходника (у фото — просто длина), середина двигает
+  pip: { list: (p) => p.pips || [], get: (x) => ({ s: x.start, e: pipEnd(x), in: x.in, out: x.out, track: x.track || 0 }),
+    set: (x, s, e, o, edge) => {
+      const m = S.project.media.find((y) => y.id === x.media);
+      const img = m?.kind === 'image', md = img ? Infinity : m?.duration ?? Infinity, sp = pipSpeed(x);
+      if (edge === 'l') {
+        if (img) { x.start = clamp(s, 0, o.e - 0.1); x.in = 0; x.out = o.e - x.start; }
+        else { const d = (s - o.s) * sp; x.in = clamp(o.in + d, 0, o.out - 0.1); x.start = o.s + (x.in - o.in) / sp; }
+      } else if (edge === 'r') x.out = clamp(o.out + (e - o.e) * sp, x.in + 0.1, md);
+      else x.start = Math.max(0, s);
+    } },
 };
 
 // ---------------------------------------------------------------------------
@@ -622,7 +667,7 @@ cv.addEventListener('pointermove', (e) => {
   if (e.buttons || e.pointerType === 'touch') return;
   const r = cv.getBoundingClientRect();
   const h = hitTest(e.clientX - r.left, e.clientY - r.top);
-  cv.style.cursor = h.edge || h.type === 'cut' ? 'ew-resize' : ['text', 'clip', 'header', 'effect', 'audio', 'trans', 'ad'].includes(h.type) ? 'pointer' : 'default';
+  cv.style.cursor = h.edge || h.type === 'cut' ? 'ew-resize' : ['text', 'clip', 'header', 'effect', 'audio', 'trans', 'ad', 'pip'].includes(h.type) ? 'pointer' : 'default';
 });
 
 cv.addEventListener('pointerdown', (e) => {
@@ -646,7 +691,7 @@ cv.addEventListener('pointerdown', (e) => {
     // режим «Несколько»: палец по пустому месту рисует рамку — выделяется всё, что она задела
     if (S.playing) stopPlayback();
     op = { kind: 'marquee', add: true, base: selItems() };
-  } else if (touch && centered() && (['empty', 'parts', 'ruler'].includes(h.type) || (!already && ['clip', 'text', 'effect', 'audio'].includes(h.type)) || (already && h.type === 'clip' && !h.edge))) {
+  } else if (touch && centered() && (['empty', 'parts', 'ruler'].includes(h.type) || (!already && ['clip', 'text', 'effect', 'audio', 'pip'].includes(h.type)) || (already && h.type === 'clip' && !h.edge))) {
     // палец по пустому месту или по клипу — прокрутка ленты (как в CapCut); плейхед при этом не прыгает.
     // Выделение — по короткому тапу (при отпускании), в режиме «Несколько» тап добавляет/снимает объект.
     const tapSel = h.id && h.type !== 'trans' && h.type !== 'header' ? { type: h.type, id: h.id } : null;
@@ -725,7 +770,7 @@ cv.addEventListener('pointerdown', (e) => {
 
   // долгое нажатие пальцем на клипе/тексте/эффекте/звуке — меню действий (как правый клик на компе)
   let lp = null;
-  if (touch && ['clip', 'text', 'effect', 'audio'].includes(h.type) && !h.edge) {
+  if (touch && ['clip', 'text', 'effect', 'audio', 'pip'].includes(h.type) && !h.edge) {
     lp = setTimeout(() => {
       lp = null;
       op.dead = true;
@@ -799,12 +844,16 @@ cv.addEventListener('pointerdown', (e) => {
         if (ns === o.s + dt && ne !== o.e + dt) ns = ne - (o.e - o.s);
         let d = snapFrame(ns) - o.s;
         d = Math.max(d, -Math.min(...Object.values(op.orig).map((v) => v.s)));
+        // одно наложение можно перетащить и на другую дорожку-слой (вверх/вниз)
+        const rowY = ev.clientY - r.top;
+        const toRow = op.type === 'pip' && Object.keys(op.orig).length === 1 ? rows.find((q) => q.key === 'pip' && rowY >= q.y && rowY < q.y + q.h) : null;
         updateEdit((p) => {
           for (const [key, ov] of Object.entries(op.orig)) {
             const i = key.indexOf(':');
             const kind = key.slice(0, i), id = key.slice(i + 1);
             const x0 = movable[kind].list(p).find((y) => y.id === id);
             if (x0) movable[kind].set(x0, ov.s + d, ov.e + d, ov);
+            if (x0 && kind === 'pip' && toRow) x0.track = toRow.lane;
           }
         });
       }
@@ -864,11 +913,14 @@ cv.addEventListener('pointerdown', (e) => {
       S.marquee = null;
     }
     if (op.kind === 'item' && !moved && op.collapse) select(op.type, [op.id]); // клик по объекту из группы — выделить только его
+    const movedPips = op.kind === 'item' && moved ? Object.keys(op.orig).filter((k) => k.startsWith('pip:')).map((k) => k.slice(4)) : [];
     if (op.kind === 'clip-move') {
       S.clipDrag = null;
       if (op.active && op.index !== op.from) { moveClip(op.id, op.index); select('clip', [op.id]); }
     }
     if (!['scrub', 'pan', 'marquee', 'clip-move'].includes(op.kind)) endEdit();
+    // наложение налезло на другое в том же слое — поднимается в свой слой над ним
+    if (movedPips.length) commit((p) => fixTracks(p, movedPips));
     request();
   };
   cv.addEventListener('pointermove', onMove);

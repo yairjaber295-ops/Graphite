@@ -77,11 +77,15 @@ export class Compositor2D {
       if (ad.mode === 'full' && !ad.chroma) { x.globalAlpha = ad.alpha; x.fillStyle = '#000'; x.fillRect(0, 0, this.outW, this.outH); }
       x.save();
       x.globalAlpha = ad.alpha;
-      const rx = (r.cx - r.w / 2) * k, ry = (r.cy - r.h / 2) * k;
+      // от центра: поворот и отражение наложения
+      x.translate(r.cx * k, r.cy * k);
+      if (ad.rot) x.rotate(ad.rot * Math.PI / 180);
+      if (ad.flip) x.scale(-1, 1);
+      const rx = -r.w / 2 * k, ry = -r.h / 2 * k;
       if (ad.radius > 0) { x.beginPath(); x.roundRect(rx, ry, r.w * k, r.h * k, ad.radius * Math.min(r.w, r.h) * k); x.clip(); }
       x.drawImage(ad.chroma ? keyed(ad.src, ad.w, ad.h, ad.chroma, this.keyCv) : ad.src, rx, ry, r.w * k, r.h * k);
       x.restore();
-      boxes.push({ item: { kind: 'ad', id: ad.id }, box: { x: r.cx - r.w / 2, y: r.cy - r.h / 2, w: r.w, h: r.h } });
+      boxes.push({ item: ad.pip ? { kind: 'pip', id: ad.pipId } : { kind: 'ad', id: ad.id }, box: { x: r.cx - r.w / 2, y: r.cy - r.h / 2, w: r.w, h: r.h } });
     }
     x.globalAlpha = 1;
     return boxes;

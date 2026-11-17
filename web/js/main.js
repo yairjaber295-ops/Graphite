@@ -6,7 +6,7 @@ import { resize as resizePreview, seek, togglePlay, stopPlayback, resetVideos, d
 import { resize as resizeTimeline, fitAll, request as redrawTimeline, setZoom } from './timeline.js';
 import { render as renderInspector } from './inspector.js';
 import { render as renderPanel, setTab, importMedia, tabList, currentTab, setAutoMode, placeMedia } from './panels.js';
-import { splitAtPlayhead, deleteSelection, trimToPlayhead, addCut, duplicateSelection, addText, selectAll, ASPECTS } from './edit.js';
+import { pipLayer, splitAtPlayhead, deleteSelection, trimToPlayhead, addCut, duplicateSelection, addText, selectAll, ASPECTS } from './edit.js';
 import { loadMedia } from './mediastate.js';
 import { openExport } from './exportui.js';
 import { initBackend, env, settings, saveSettings, connectPc, LABS, labOn, setLab } from './backend/index.js';
@@ -49,6 +49,7 @@ function closeSheets() { openSheet(null); }
 $('sheet-back').addEventListener('click', closeSheets);
 $('sheet-close').addEventListener('click', closeSheets);
 on('open-inspector', () => openSheet('inspector'));
+on('close-sheets', () => closeSheets());
 on('open-panel', () => { if (S.mobile) openSheet('panel'); });
 // включили/выключили тестовую функцию — перерисовать то, где она видна
 on('labs-changed', () => { if (!$('home').hidden) showHome(); else renderPanel(); });
@@ -83,10 +84,14 @@ function buildMobileBar() {
         setTimeout(() => document.getElementById('insp-speed')?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 50);
       }));
     }
-    if (['clip', 'text', 'effect', 'audio', 'mixed'].includes(kind)) items.push(b('split', 'Разрезать', splitAtPlayhead));
+    if (kind === 'pip' && single) {
+      items.push(b('up', 'Выше', () => pipLayer(S.sel.ids[0], 1)));
+      items.push(b('down', 'Ниже', () => pipLayer(S.sel.ids[0], -1)));
+    }
+    if (['clip', 'text', 'effect', 'audio', 'pip', 'mixed'].includes(kind)) items.push(b('split', 'Разрезать', splitAtPlayhead));
     if (kind === 'clip' && single) items.push(b('transition', 'Переход', () => { setTab('transitions'); openSheet('panel'); }));
-    if (['text', 'effect', 'audio', 'mixed'].includes(kind)) items.push(b('copy', 'Копия', duplicateSelection));
-    if (single && ['clip', 'text', 'effect', 'audio'].includes(kind)) items.push(b('more', 'Ещё', openSelectionMenu));
+    if (['text', 'effect', 'audio', 'pip', 'mixed'].includes(kind)) items.push(b('copy', 'Копия', duplicateSelection));
+    if (single && ['clip', 'text', 'effect', 'audio', 'pip'].includes(kind)) items.push(b('more', 'Ещё', openSelectionMenu));
     items.push(multi);                                   // «Несколько» доступно сразу из выбранного клипа
     if (S.multi) items.push(b('sparkles', 'Все', selectAll));
     items.push(b('trash', 'Удалить', () => { deleteSelection(); closeSheets(); }, false, 'danger'));

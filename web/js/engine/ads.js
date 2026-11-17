@@ -198,7 +198,7 @@ export function adRect(ad, W, H) {
     return { cx: W / 2, cy: H / 2, w: ad.w * s, h: ad.h * s };
   }
   let w = (ad.size || 0.6) * W, h = (w * ad.h) / ad.w;
-  if (h > H * 0.9) { w *= (H * 0.9) / h; h = H * 0.9; }
+  if (!ad.pip && h > H * 0.9) { w *= (H * 0.9) / h; h = H * 0.9; }   // наложение — любого размера, хоть больше кадра
   return { cx: (ad.x ?? 0.5) * W, cy: (ad.y ?? 0.74) * H + (ad.dy || 0), w: w * ad.scale, h: h * ad.scale };
 }
 

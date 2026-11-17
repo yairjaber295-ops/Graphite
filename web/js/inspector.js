@@ -9,7 +9,7 @@ import { overlayItem } from './overlays.js';
 import { MOTIONS } from './engine/frame.js';
 import { fxThumb } from './fxpreview.js';
 import { FILTERS, TRANSITIONS, EFFECTS, defaultParams } from './engine/effects.js';
-import { splitAtPlayhead, deleteSelection, duplicateSelection, setTransition, setTransitionAll, setClipSpeed, freezeFrame, setFreezeDur } from './edit.js';
+import { pipLayer, pipFit, splitAtPlayhead, deleteSelection, duplicateSelection, setTransition, setTransitionAll, setClipSpeed, freezeFrame, setFreezeDur } from './edit.js';
 import { detachAudio } from './detach.js';
 import { CURVES, hasCurve, clipDur, curveAt } from './engine/speed.js';
 import { seek, play, stopPlayback } from './preview.js';
@@ -19,6 +19,7 @@ import { adsSection, chromaEditor } from './adsui.js';
 import { AFX_FILTERS, AFX_PRESETS, hasAfx } from './engine/afx.js';
 import { speedControl } from './speedui.js';
 import { openEnhance, enhanceStatus } from './enhanceui.js';
+import { pipEnd, pipLen } from './engine/pips.js';
 import { AUDIO_PRESETS, REMIX_STYLES, audioLen, hasAudioProc } from './engine/audioproc.js';
 
 const root = document.getElementById('inspector');
@@ -579,9 +580,43 @@ function renderOverlay(id) {
       () => { commit((p) => { p.overlays = p.overlays.filter((y) => y.id !== id); }); }, render));
 }
 
+function renderPip(id) {
+  const x = (S.project.pips || []).find((y) => y.id === id);
+  if (!x) return renderProject();
+  const m = S.project.media.find((y) => y.id === x.media);
+  const img = m?.kind === 'image';
+  const set = (k, v, merge = true) => commit((p) => { const y = p.pips.find((q) => q.id === id); if (y) y[k] = v; }, merge ? `pip-${id}-${k}` : null);
+  const btn = (label, fn, ic) => h('button', { class: 'btn', onclick: () => { fn(); render(); } }, ic ? h('span', { 'data-icon': ic }) : null, label);
+  const len = pipLen(x);
+  return h('div', {},
+    h('h3', {}, img ? 'Фото поверх' : 'Видео поверх'),
+    h('div', { class: 'note' }, `${m?.name || ''} · ${fmtTime(x.start)} – ${fmtTime(pipEnd(x))} · слой ${(x.track || 0) + 1}`),
+    actions(btn('Слой выше', () => pipLayer(id, 1), 'up'), btn('Слой ниже', () => pipLayer(id, -1), 'down')),
+    h('h4', {}, 'Положение'),
+    range('Размер', x.size ?? 0.5, { min: 0.05, max: 3, step: 0.01, fmt: pct, onInput: (v) => set('size', v) }),
+    range('По горизонтали', x.x ?? 0.5, { min: -0.5, max: 1.5, step: 0.005, fmt: (v) => Math.round(v * 100) + '%', onInput: (v) => set('x', v) }),
+    range('По вертикали', x.y ?? 0.5, { min: -0.5, max: 1.5, step: 0.005, fmt: (v) => Math.round(v * 100) + '%', onInput: (v) => set('y', v) }),
+    range('Поворот', x.rot || 0, { min: -180, max: 180, step: 1, fmt: (v) => v + '°', onInput: (v) => set('rot', v) }),
+    actions(btn('По центру', () => pipFit(id, 'center')), btn('Во всю ширину', () => pipFit(id, 'width')), btn('На весь экран', () => pipFit(id, 'fill')),
+      btn('Отразить', () => set('flip', !x.flip, false))),
+    h('h4', {}, 'Вид'),
+    range('Непрозрачность', x.opacity ?? 1, { min: 0, max: 1, step: 0.01, fmt: pct, onInput: (v) => set('opacity', v) }),
+    range('Скругление углов', x.radius || 0, { min: 0, max: 0.5, step: 0.01, fmt: pct, onInput: (v) => set('radius', v) }),
+    range('Плавное появление', x.fadeIn || 0, { min: 0, max: Math.min(3, len / 2), step: 0.05, fmt: (v) => v.toFixed(2) + ' с', onInput: (v) => set('fadeIn', v) }),
+    range('Плавное исчезание', x.fadeOut || 0, { min: 0, max: Math.min(3, len / 2), step: 0.05, fmt: (v) => v.toFixed(2) + ' с', onInput: (v) => set('fadeOut', v) }),
+    img ? range('Длина', len, { min: 0.2, max: 60, step: 0.1, fmt: (v) => v.toFixed(1) + ' с', onInput: (v) => commit((p) => { const y = p.pips.find((q) => q.id === id); if (y) { y.in = 0; y.out = v; } }, `pip-${id}-len`) }) : null,
+    img ? null : h('h4', {}, 'Звук и скорость'),
+    img ? null : range('Громкость', x.volume ?? 1, { min: 0, max: 2, step: 0.05, fmt: pct, onInput: (v) => set('volume', v) }),
+    img ? null : range('Скорость', x.speed || 1, { min: 0.25, max: 4, step: 0.05, fmt: (v) => v.toFixed(2) + '×', onInput: (v) => set('speed', v) }),
+    h('h4', {}, 'Хромакей (убрать зелёный фон)'),
+    chromaEditor(() => x.chroma, (fn) => commit((p) => { const y = p.pips.find((q) => q.id === id); y.chroma = { ...CHROMA_DEFAULTS, ...y.chroma }; fn(y.chroma); }, `pip-${id}-chroma`),
+      x.media, render),
+    actions(h('button', { class: 'btn', onclick: splitAtPlayhead }, 'Разрезать'), h('button', { class: 'btn', onclick: duplicateSelection }, 'Копия'), delBtn()));
+}
+
 function renderMixed() {
   const items = selItems();
-  const names = { clip: 'клипов', text: 'текстов и субтитров', effect: 'эффектов', audio: 'звуков', cut: 'границ', header: 'заголовков' };
+  const names = { pip: 'наложений', clip: 'клипов', text: 'текстов и субтитров', effect: 'эффектов', audio: 'звуков', cut: 'границ', header: 'заголовков' };
   const counts = {};
   for (const x of items) counts[x.kind] = (counts[x.kind] || 0) + 1;
   return h('div', {},
@@ -598,7 +633,7 @@ export function render() {
   if (!S.project) return;
   const { kind, ids } = S.sel;
   let el;
-  if (kind === 'mixed' || (ids.length > 1 && ['clip', 'audio', 'cut', 'header'].includes(kind))) el = renderMixed();
+  if (kind === 'mixed' || (ids.length > 1 && ['clip', 'audio', 'cut', 'header', 'pip'].includes(kind))) el = renderMixed();
   else if (kind === 'clip') el = renderClip(ids[0], focusTrans);
   else if (kind === 'text') el = renderText(ids);
   else if (kind === 'header') el = renderHeader(ids[0]);
@@ -606,6 +641,7 @@ export function render() {
   else if (kind === 'effect') el = renderEffect(ids);
   else if (kind === 'audio') el = renderAudio(ids[0]);
   else if (kind === 'overlay') el = renderOverlay(ids[0]);
+  else if (kind === 'pip' && ids.length === 1) el = renderPip(ids[0]);
   else if (kind === 'ad') el = adsSection(render, { open: true });
   else el = renderProject();
   root.replaceChildren(el);

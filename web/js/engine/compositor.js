@@ -288,9 +288,9 @@ export class Compositor {
       if (ad.chroma) this.setKey(pr, ad.chroma);
       if (ad.radius > 0) gl.uniform3f(pr.uni.rr, ad.radius * Math.min(r.w, r.h) * k, r.w * k, r.h * k);
       gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE);
-      this.draw(pr, chain(Sc(1 / W, 1 / H), T(r.cx, r.cy), Sc(r.w, r.h), T(-0.5, -0.5)));
+      this.draw(pr, chain(Sc(1 / W, 1 / H), T(r.cx, r.cy), R((ad.rot || 0) * Math.PI / 180), Sc(ad.flip ? -r.w : r.w, r.h), T(-0.5, -0.5)));
       gl.disable(gl.BLEND);
-      boxes.push({ item: { kind: 'ad', id: ad.id }, box: { x: r.cx - r.w / 2, y: r.cy - r.h / 2, w: r.w, h: r.h } });
+      boxes.push({ item: ad.pip ? { kind: 'pip', id: ad.pipId } : { kind: 'ad', id: ad.id }, box: { x: r.cx - r.w / 2, y: r.cy - r.h / 2, w: r.w, h: r.h } });
     }
     return boxes;
   }

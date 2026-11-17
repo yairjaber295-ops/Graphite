@@ -2,7 +2,7 @@
 // быстрые действия с тем, что под курсором — звук (бас, «телефон»…), скорость, фильтр, хромакей, переход, эффект.
 import { S, commit, select, emit, on, isSelected, uid, fmtTime, CHROMA_DEFAULTS } from './store.js';
 import { h, toast } from './ui.js';
-import { splitAtPlayhead, deleteSelection, duplicateSelection, setClipSpeed, setTransition, addEffect, addText, addCut, clipStart, rippleInsert, freezeFrame, setFreezeDur } from './edit.js';
+import { pipLayer, pipFit, splitAtPlayhead, deleteSelection, duplicateSelection, setClipSpeed, setTransition, addEffect, addText, addCut, clipStart, rippleInsert, freezeFrame, setFreezeDur } from './edit.js';
 import { seek, hitAt, keyColorOf, peekAd } from './preview.js';
 import { hitAtClient } from './timeline.js';
 import { AFX_PRESETS, hasAfx } from './engine/afx.js';
@@ -167,6 +167,35 @@ function audioMenu(id) {
   ];
 }
 
+function pipMenu(id) {
+  const x = (S.project.pips || []).find((y) => y.id === id) || {};
+  const apply = (fn) => commit((p) => { const y = p.pips.find((q) => q.id === id); if (y) fn(y); });
+  const m = S.project.media.find((y) => y.id === x.media);
+  return [
+    { label: 'Слой выше', action: () => pipLayer(id, 1) },
+    { label: 'Слой ниже', action: () => pipLayer(id, -1) },
+    '-',
+    { label: 'Разрезать здесь', hint: 'Ctrl+B', action: splitAtPlayhead },
+    { label: 'Копия', action: duplicateSelection },
+    { label: 'Положение', sub: [
+      { label: 'По центру', action: () => pipFit(id, 'center') },
+      { label: 'Во всю ширину', action: () => pipFit(id, 'width') },
+      { label: 'На весь экран', action: () => pipFit(id, 'fill') },
+      { label: 'Отразить', on: !!x.flip, action: () => apply((y) => { y.flip = !y.flip; }) },
+    ] },
+    { label: 'Размер', sub: [0.25, 0.33, 0.5, 0.75, 1].map((v) => ({ label: Math.round(v * 100) + '%', on: Math.abs((x.size ?? 0.5) - v) < 0.005, action: () => apply((y) => { y.size = v; }) })) },
+    { label: 'Скругление', sub: [[0, 'Нет'], [0.06, 'Чуть'], [0.15, 'Сильно'], [0.5, 'Круг / овал']].map(([v, l]) => ({ label: l, on: Math.abs((x.radius || 0) - v) < 0.005, action: () => apply((y) => { y.radius = v; }) })) },
+    m?.kind === 'image' ? null : { label: 'Звук', sub: [[0, 'Без звука'], [0.5, '50%'], [1, '100%'], [1.5, '150%']].map(([v, l]) => ({ label: l, on: (x.volume ?? 1) === v, action: () => apply((y) => { y.volume = v; }) })) },
+    { label: 'Хромакей', on: !!x.chroma?.enabled, action: () => {
+      const col = keyColorOf(x.media);
+      apply((y) => { y.chroma = { ...CHROMA_DEFAULTS, ...y.chroma, enabled: !y.chroma?.enabled, ...(col && !y.chroma?.enabled ? { color: col } : {}) }; });
+    } },
+    { label: 'Свойства…', action: () => props() },
+    '-',
+    { label: 'Удалить', hint: 'Del', danger: true, action: deleteSelection },
+  ];
+}
+
 function textMenu(id) {
   const it = S.project.texts.find((x) => x.id === id);
   if (!it) return [];
@@ -228,6 +257,7 @@ function menuFor(hit, t) {
     case 'audio': ensureSel('audio', hit.id); return audioMenu(hit.id);
     case 'text': ensureSel('text', hit.id); return textMenu(hit.id);
     case 'effect': ensureSel('effect', hit.id); return effectMenu(hit.id);
+    case 'pip': ensureSel('pip', hit.id); return pipMenu(hit.id);
     case 'ad': select('ad', ['ads']); return adMenu(hit.ad);
     case 'header': select('header', [hit.id]); return [{ label: 'Свойства заголовка…', action: () => props() }, { label: 'Выключить заголовки', danger: true, action: deleteSelection }];
     default: return emptyMenu(t);
@@ -249,7 +279,7 @@ on('long-press', ({ x, y }) => {
 /** Кнопка «Ещё» в нижней панели: те же действия для выбранного клипа/текста/звука/эффекта. */
 export function openSelectionMenu() {
   const { kind, ids } = S.sel;
-  if (!S.project || ids.length !== 1 || !['clip', 'text', 'effect', 'audio'].includes(kind)) return;
+  if (!S.project || ids.length !== 1 || !['clip', 'text', 'effect', 'audio', 'pip'].includes(kind)) return;
   lpAt = Date.now();
   openMenu(0, 0, menuFor({ type: kind, id: ids[0] }, S.t));
 }

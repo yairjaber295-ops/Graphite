@@ -8,6 +8,7 @@ import { duckPoints } from './smart.js';
 import { settings } from './backend/index.js';
 import { hasCurve, speedAt } from './engine/speed.js';
 import { adGain, guessKeyColor, insertsIn } from './engine/ads.js';
+import { pipGain } from './engine/pips.js';
 import { hasAfx, makeChain, setChain } from './engine/afx.js';
 import { censorGain, censorBeep, BEEP_HZ, BEEP_GAIN } from './engine/censor.js';
 import { audioLen, audioSpeed, processedBuffer } from './engine/audioproc.js';
@@ -39,6 +40,7 @@ function sizeRef(it) {
   switch (it.kind) {
     case 'clip': { const c = p.clips.find((x) => x.id === it.id); return c && { get: () => c.scale ?? 1, set: (v) => { c.scale = +clamp(v, 0.1, 6).toFixed(3); } }; }
     case 'ad': return { get: () => p.ads.size ?? 0.6, set: (v) => { p.ads.size = +clamp(v, 0.1, 1).toFixed(3); } };
+    case 'pip': { const x = (p.pips || []).find((y) => y.id === it.id); return x && { get: () => x.size ?? 0.5, set: (v) => { x.size = +clamp(v, 0.03, 4).toFixed(3); } }; }
     case 'sub': return style(p.subs.style);
     case 'header': return style(p.headers.style);
     case 'overlay': return style(p.overlays.find((o) => o.id === it.overlay)?.style);
@@ -303,7 +305,7 @@ function drawUi(spec) {
     handles.push({ pts, item: { kind: 'clip', id: l.clip.id }, cx, cy });
   }
   for (const { item, box } of boxes) {
-    const sel = item.kind === 'ad' ? isSelected('ad', 'ads') : item.kind === 'overlay' ? isSelected('overlay', item.overlay) : isSelected(item.kind === 'header' ? 'header' : 'text', item.id);
+    const sel = item.kind === 'ad' ? isSelected('ad', 'ads') : item.kind === 'pip' ? isSelected('pip', item.id) : item.kind === 'overlay' ? isSelected('overlay', item.overlay) : isSelected(item.kind === 'header' ? 'header' : 'text', item.id);
     if (!sel) continue;
     uictx.strokeStyle = accent();
     uictx.strokeRect(box.x * k, box.y * k, box.w * k, box.h * k);
@@ -439,7 +441,7 @@ function tick() {
   const used = new Set();
   const sync = [
     ...spec.layers.map((l) => ({ v: l.el, hold: !!spec.frozen || !!l.clip.freeze, muted: hasCurve(l.clip), gain: clipGain(l.clip, t) * censorGain(t), afx: l.clip.afx, rate: clamp(speedAt(l.clip, t - l.clip.start), 0.0625, 16), want: srcTime(l.clip, t) })),
-    ...spec.ads.map((ad) => ({ v: ad.el, muted: false, gain: adGain({ start: 0, end: ad.end - ad.start }, ad.age), rate: ad.speed || 1, want: ad.want })),
+    ...spec.ads.map((ad) => ({ v: ad.el, muted: false, gain: ad.pip ? pipGain(ad, ad.age) : adGain({ start: 0, end: ad.end - ad.start }, ad.age), rate: ad.speed || 1, want: ad.want })),
   ];
   for (const { v, hold, muted, gain, afx, rate, want } of sync) {
     if (!v) continue; // фото — синхронизировать нечего
@@ -650,7 +652,13 @@ ui.addEventListener('pointerdown', (e) => {
   let drag = null;
   if (hit) {
     const it = hit.item;
-    if (it.kind === 'ad') {
+    if (it.kind === 'pip') {
+      // наложение: позиция долями кадра, размер — уголками или двумя пальцами
+      const { w: W, h: H } = S.project.canvas;
+      const target = (S.project.pips || []).find((x) => x.id === it.id);
+      select('pip', [it.id], S.multi || e.shiftKey);
+      if (target) drag = { target, frac: [W, H], x0: (target.x ?? 0.5) * W, y0: (target.y ?? 0.5) * H, key: 'move-pip-' + target.id, cx: W / 2, cy: H / 2, pip: true };
+    } else if (it.kind === 'ad') {
       // реклама: одна позиция на все вставки (доли кадра); на весь экран — не двигается
       const { w: W, h: H } = S.project.canvas;
       const a = S.project.ads;
@@ -720,16 +728,23 @@ function pinch(drag) {
   const [a, b] = [...pointers.values()];
   const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
   if (!pinchStart) {
-    pinchStart = { d, scale: drag.ad ? drag.target.size ?? 0.6 : drag.clip ? drag.clip.scale ?? 1 : (drag.target.style || drag.target.style)?.size };
+    pinchStart = { d, scale: drag.pip ? drag.target.size ?? 0.5 : drag.ad ? drag.target.size ?? 0.6 : drag.clip ? drag.clip.scale ?? 1 : (drag.target.style || drag.target.style)?.size };
     return;
   }
   const f = d / pinchStart.d;
-  if (drag.ad) commit(() => { drag.target.size = +clamp(pinchStart.scale * f, 0.15, 1).toFixed(3); }, 'pinch-ad');
+  if (drag.pip) commit(() => { drag.target.size = +clamp(pinchStart.scale * f, 0.03, 4).toFixed(3); }, 'pinch-pip-' + drag.target.id);
+  else if (drag.ad) commit(() => { drag.target.size = +clamp(pinchStart.scale * f, 0.15, 1).toFixed(3); }, 'pinch-ad');
   else if (drag.clip) commit(() => { drag.clip.scale = +clamp(pinchStart.scale * f, 0.2, 5).toFixed(3); }, 'pinch-' + drag.clip.id);
   else if (drag.target.style) commit(() => { drag.target.style.size = Math.round(clamp(pinchStart.scale * f, 16, 260)); }, 'pinch-text');
 }
 
 ui.addEventListener('wheel', (e) => {
+  if (S.sel.kind === 'pip') {
+    e.preventDefault();
+    const x = (S.project.pips || []).find((y) => y.id === S.sel.ids[0]);
+    if (x) commit(() => { x.size = +clamp((x.size ?? 0.5) * (e.deltaY < 0 ? 1.04 : 1 / 1.04), 0.03, 4).toFixed(3); }, 'scale-pip-' + x.id);
+    return;
+  }
   if (S.sel.kind === 'ad') {
     e.preventDefault();
     const a = S.project.ads;

@@ -1,5 +1,6 @@
 // Операции редактирования: разрез, удаление, обрезка, части. Общие для таймлайна, кнопок и горячих клавиш.
-import { S, commit, clipsTL, clipAt, duration, select, selectItems, selItems, uid, snapFrame, emit, STYLE_BASE, CLIP_DEFAULTS } from './store.js';
+import { S, commit, clipsTL, clipAt, duration, select, selectItems, selItems, uid, snapFrame, emit, STYLE_BASE, CLIP_DEFAULTS, PIP_DEFAULTS } from './store.js';
+import { pipLen, pipEnd, pipSpeed, topTrackFor, fixTracks, compactTracks, moveLayer } from './engine/pips.js';
 import { defaultParams, packEffects, transitionDefaultDur, EFFECTS } from './engine/effects.js';
 import { clipDur, srcOffset, hasCurve } from './engine/speed.js';
 import { audioLen, audioSrcAt, audioTlOf } from './engine/audioproc.js';
@@ -190,7 +191,9 @@ export function splitAtPlayhead() {
   const texts = hit(S.project.texts, idsOf('text')), fx = hit(S.project.effects, idsOf('effect'));
   const auds = S.project.audio.filter((a) => idsOf('audio').includes(a.id) && t > a.start + MIN_TEXT && t < a.start + audioLen(a) - MIN_TEXT);
   const clipsSel = idsOf('clip');
-  if (texts.length || fx.length || auds.length) {
+  const pips = (S.project.pips || []).filter((x) => idsOf('pip').includes(x.id) && t > x.start + MIN_TEXT && t < pipEnd(x) - MIN_TEXT);
+  if (idsOf('pip').length && !pips.length && !texts.length && !fx.length && !auds.length && !clipsSel.length) return emit('toast', { text: 'Поставь курсор внутрь наложения' });
+  if (texts.length || fx.length || auds.length || pips.length) {
     commit((p) => {
       for (const [key, targets] of [['texts', texts], ['effects', fx]]) {
         for (const it of p[key].filter((x) => targets.some((y) => y.id === x.id))) {
@@ -200,6 +203,12 @@ export function splitAtPlayhead() {
           it.end = t;
           p[key].push(copy);
         }
+      }
+      for (const x of p.pips.filter((y) => pips.some((a) => a.id === y.id))) {
+        const local = x.in + (t - x.start) * pipSpeed(x); // секунда исходника под курсором
+        p.pips.push({ ...structuredClone(x), id: uid(), start: t, in: local, fadeIn: 0 });
+        x.out = local;
+        x.fadeOut = 0;
       }
       for (const x of p.audio.filter((y) => auds.some((a) => a.id === y.id))) {
         const local = audioSrcAt(x, t); // секунда исходника под курсором (с учётом скорости)
@@ -255,6 +264,7 @@ export function deleteSelection() {
     p.effects = p.effects.filter((x) => !ids('effect').includes(x.id));
     p.audio = p.audio.filter((x) => !ids('audio').includes(x.id));
     p.overlays = (p.overlays || []).filter((x) => !ids('overlay').includes(x.id));
+    if (ids('pip').length) { p.pips = (p.pips || []).filter((x) => !ids('pip').includes(x.id)); compactTracks(p); }
     const idx = ids('cut').map((id) => +id.slice(1));
     if (idx.length) p.parts.cuts = [...p.parts.cuts].sort((a, b) => a - b).filter((_, i) => !idx.includes(i));
     if (ids('header').length) p.headers.enabled = false;
@@ -275,6 +285,7 @@ export function selectAll() {
     ...p.texts.map((t) => ({ kind: 'text', id: t.id })),
     ...p.effects.map((e) => ({ kind: 'effect', id: e.id })),
     ...p.audio.map((a) => ({ kind: 'audio', id: a.id })),
+    ...(p.pips || []).map((x) => ({ kind: 'pip', id: x.id })),
   ]);
 }
 
@@ -496,18 +507,18 @@ export function addText(style = {}, text = 'Текст') {
 
 /** Копия выделенных текстов/эффектов/звуков сразу после них (вся группа сдвигается целиком). */
 export function duplicateSelection() {
-  const items = selItems().filter((x) => ['text', 'effect', 'audio'].includes(x.kind));
+  const items = selItems().filter((x) => ['text', 'effect', 'audio', 'pip'].includes(x.kind));
   if (!items.length) return;
   const p0 = S.project;
-  const find = (x) => ({ text: p0.texts, effect: p0.effects, audio: p0.audio }[x.kind]).find((y) => y.id === x.id);
-  const span = (o) => (o.out != null ? [o.start, o.start + audioLen(o)] : [o.start, o.end]);
+  const find = (x) => ({ text: p0.texts, effect: p0.effects, audio: p0.audio, pip: p0.pips }[x.kind]).find((y) => y.id === x.id);
+  const span = (o) => (o.size != null && o.track != null ? [o.start, pipEnd(o)] : o.out != null ? [o.start, o.start + audioLen(o)] : [o.start, o.end]);
   const objs = items.map(find).filter(Boolean);
   const gStart = Math.min(...objs.map((o) => span(o)[0])), gEnd = Math.max(...objs.map((o) => span(o)[1]));
   const shift = gEnd - gStart;
   const made = [];
   commit((p) => {
     for (const x of items) {
-      const key = { text: 'texts', effect: 'effects', audio: 'audio' }[x.kind];
+      const key = { text: 'texts', effect: 'effects', audio: 'audio', pip: 'pips' }[x.kind];
       const it = p[key].find((y) => y.id === x.id);
       if (!it) continue;
       const c = structuredClone(it);
@@ -518,6 +529,58 @@ export function duplicateSelection() {
       p[key].push(c);
       made.push({ kind: x.kind, id: c.id });
     }
+    if (made.some((x) => x.kind === 'pip')) fixTracks(p, made.map((x) => x.id));
   });
   selectItems(made);
+}
+
+// ---------------------------------------------------------------------------
+//   Наложение: видео и фото поверх основного видео
+// ---------------------------------------------------------------------------
+export const PIP_PHOTO_SEC = 3;
+
+/** Поставить файл поверх видео с позиции курсора. Если основы ещё нет — файл становится основой. */
+export function addPip(m) {
+  if (m.kind === 'audio') return addAudio(m);
+  if (!S.project.clips.length) { addMediaToTimeline(m); emit('toast', { text: 'Первое видео — основа. Следующие файлы встанут поверх.' }); return null; }
+  const total = duration();
+  const start = snapFrame(S.t >= total - 0.3 ? 0 : S.t);
+  const left = Math.max(0.5, total - start);
+  const len = m.kind === 'image' ? Math.min(PIP_PHOTO_SEC, left) : Math.min(m.duration || PIP_PHOTO_SEC, left);
+  const id = uid();
+  // горизонтальное — почти во всю ширину, квадратное — чуть больше половины, вертикальное — половина
+  const ar = (m.width || 1) / (m.height || 1);
+  const size = ar > 1.2 ? 0.9 : ar >= 0.8 ? 0.6 : 0.5;
+  commit((p) => {
+    p.pips ||= [];
+    const x = { id, media: m.id, start, in: 0, out: len, ...structuredClone(PIP_DEFAULTS), size };
+    // повыше центра, если в кадре уже есть другое наложение в это же время
+    const under = p.pips.filter((y) => y.start < start + len && start < pipEnd(y)).length;
+    x.y = +(0.5 + (under % 3 === 1 ? -0.22 : under % 3 === 2 ? 0.22 : 0)).toFixed(3);
+    x.track = topTrackFor(p, start, start + len);
+    p.pips.push(x);
+  });
+  select('pip', [id]);
+  return id;
+}
+
+/** Слой выше / ниже. */
+export function pipLayer(id, dir) {
+  let ok = false;
+  commit((p) => { ok = moveLayer(p, id, dir); });
+  if (!ok) emit('toast', { text: dir > 0 ? 'Выше уже ничего нет' : 'Ниже — только основное видео' });
+}
+
+/** Готовые положения: по центру, на весь кадр (с обрезкой по краям), во всю ширину. */
+export function pipFit(id, how) {
+  const W = S.project.canvas.w, H = S.project.canvas.h;
+  commit((p) => {
+    const x = (p.pips || []).find((y) => y.id === id);
+    const m = p.media.find((y) => y.id === x?.media);
+    if (!x || !m) return;
+    const ar = (m.width || 1) / (m.height || 1);
+    if (how === 'center') { x.x = 0.5; x.y = 0.5; }
+    if (how === 'width') { x.x = 0.5; x.y = 0.5; x.size = 1; x.rot = 0; }
+    if (how === 'fill') { x.x = 0.5; x.y = 0.5; x.rot = 0; x.size = +Math.max(1, (H / W) * ar).toFixed(3); }
+  });
 }

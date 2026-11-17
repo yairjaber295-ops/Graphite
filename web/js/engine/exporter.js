@@ -7,6 +7,7 @@ import { frameAt, layersAt, coverInfo, insertFrame } from './frame.js';
 import { AudioMixer } from './audiomix.js';
 import { coverAssetsReady } from './covers.js';
 import { adsAt, adState, outTimeline } from './ads.js';
+import { pipsAt } from './pips.js';
 
 const AUDIO_CHUNK = 5; // секунд звука за раз
 
@@ -103,8 +104,7 @@ export async function exportVideo({ segments, source, decoded, target, onProgres
   const total = outs.reduce((s, x) => s + x.len, 0) || 1;
   let doneSec = 0;
   const results = [];
-  const rotCanvas = document.createElement('canvas');
-  let rotCanvas2 = null; // второй — если и реклама снята телефоном с поворотом
+  const rotCanvases = []; // по холсту на каждый повёрнутый источник кадра (видео с телефона: основа, наложения, реклама)
   let lastValidSample = {};
 
   try {
@@ -130,7 +130,8 @@ export async function exportVideo({ segments, source, decoded, target, onProgres
           if (fresh) { need(l.clip.id, l.src); seen.add(l.clip.id); }
         }
         // реклама: каждая вставка — свой «клип» со своим декодером
-        const ads = at.ins ? [adState(at.ins, at.age)] : adsAt(at.t);
+        // тот же порядок, что в frameAt: наложения снизу вверх, потом реклама
+        const ads = at.ins ? [adState(at.ins, at.age)] : [...pipsAt(at.t), ...adsAt(at.t)];
         for (const ad of ads) {
           const id = 'ad:' + ad.id;
           clipById[id] ||= { id, media: ad.media };
@@ -224,14 +225,14 @@ export async function exportVideo({ segments, source, decoded, target, onProgres
           }
           samples.push(sample || null);
         }
-        let rotUsed = false;
+        let rotUsed = 0;
         const frameOf = (s) => {
           if (!s) return { src: null };
           if (s.bitmap) return { src: s.bitmap, w: s.bitmap.width, h: s.bitmap.height };
           if (s.rotation) {
             // видео с телефона с поворотом в метаданных — поворачиваем сами
-            const cv = rotUsed ? (rotCanvas2 ||= document.createElement('canvas')) : rotCanvas;
-            rotUsed = true;
+            const cv = (rotCanvases[rotUsed] ||= document.createElement('canvas'));
+            rotUsed++;
             cv.width = s.displayWidth; cv.height = s.displayHeight;
             s.drawWithFit(cv.getContext('2d'), { fit: 'fill' });
             return { src: cv, w: s.displayWidth, h: s.displayHeight };

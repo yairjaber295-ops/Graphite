@@ -68,6 +68,10 @@ export const AD_DEFAULTS = {
   chroma: { ...CHROMA_DEFAULTS },
 };
 
+/** Наложение: видео или фото поверх основного видео (мемы, «картинка в картинке»). x, y — центр долями кадра,
+ *  size — ширина долей ширины кадра, track — слой (больше — выше), in/out — отрезок исходника (у фото out — длина). */
+export const PIP_DEFAULTS = { x: 0.5, y: 0.5, size: 0.5, rot: 0, opacity: 1, radius: 0, volume: 1, speed: 1, fadeIn: 0, fadeOut: 0, track: 0, flip: false };
+
 export function normalize(p) {
   // v1 → v2: заголовки и обложки по умолчанию Rubik Bold (как в CapCut-нарезках)
   if (!p.version || p.version < 2) {
@@ -78,12 +82,13 @@ export function normalize(p) {
   for (const m of p.media || []) m.kind ||= 'video';
   if (p.covers?.style === 'frame') p.covers.style = 'badge'; // старое имя стиля
   for (const c of p.clips || []) defaults(c, CLIP_DEFAULTS);
+  for (const x of p.pips || []) defaults(x, PIP_DEFAULTS);
   return defaults(p, {
     name: 'Новый проект',
     title: '',
     canvas: { w: 1080, h: 1920, fps: 60 },
     background: { mode: 'blur', blur: 40, dim: 0.15, color: '#000000' },
-    media: [], clips: [], texts: [], effects: [], audio: [], beats: {}, overlays: [],
+    media: [], clips: [], texts: [], effects: [], audio: [], beats: {}, overlays: [], pips: [],
     ducking: { enabled: false, level: 0.3, threshold: 0.16 },
     censor: { on: false, mode: 'beep', subs: true, custom: '', song: 'mute' },   // запикивание мата (engine/censor.js)
     ads: AD_DEFAULTS,
@@ -235,6 +240,7 @@ function fixSelection() {
     effect: (id) => p.effects.some((e) => e.id === id),
     audio: (id) => p.audio.some((a) => a.id === id),
     overlay: (id) => (p.overlays || []).some((o) => o.id === id),
+    pip: (id) => (p.pips || []).some((o) => o.id === id),
     ad: () => !!p.ads?.enabled,
   };
   setSel(selItems().filter((x) => exists[x.kind]?.(x.id)));

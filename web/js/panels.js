@@ -1,5 +1,5 @@
 // Левая панель (на телефоне — шторка): Медиа, Аудио, Текст, Субтитры, Эффекты, Переходы, Авто (нарезка и эдит), Холст.
-import { S, on, emit, commit, parts, partLabel, subs, STYLE_BASE, fmtTime, clipsTL, isMusic } from './store.js';
+import { S, on, emit, commit, select, parts, partLabel, subs, STYLE_BASE, fmtTime, clipsTL, isMusic } from './store.js';
 import { tracksTab } from './musicui.js';
 import { beatTab, stopBeatPreview } from './beatui.js';
 import { h, field, range, color, select as sel, seg, check, textInput, fontPicker, toast, pct, modal } from './ui.js';
@@ -7,7 +7,7 @@ import { drawItem } from './engine/text.js';
 import { EFFECTS, TRANSITIONS, EFFECT_GROUPS, TRANSITION_GROUPS, EFFECT_PACKS, transitionDefaultDur } from './engine/effects.js';
 import { fxThumb } from './fxpreview.js';
 import { pauseSpans, removePauses, addAccents, clearAccents, addEmoji, removeEmoji, hasEmoji } from './smart.js';
-import { addMediaToTimeline, addText, addEffect, addAudio, setTransition, setTransitionAll, effectsOnBeats, cutClipsOnBeats, beatsInTimeline, ASPECTS, setAspect, containScale, addPack } from './edit.js';
+import { addPip, addMediaToTimeline, addText, addEffect, addAudio, setTransition, setTransitionAll, effectsOnBeats, cutClipsOnBeats, beatsInTimeline, ASPECTS, setAspect, containScale, addPack } from './edit.js';
 import { rebuildSubs, transcribeAll, missingWords, splitIntoParts, doEverything, timelineWords, cutsSummary, detectBeats } from './auto.js';
 import { seek } from './preview.js';
 import { censorRegions, maskText } from './engine/censor.js';
@@ -23,6 +23,7 @@ import { adsSection } from './adsui.js';
 import { COVER_STYLES, drawCover, makeAvatar } from './engine/covers.js';
 import { coverInfo } from './engine/frame.js';
 import { hydrateIcons } from './icons.js';
+import { pipEnd } from './engine/pips.js';
 import { labOn } from './backend/index.js';
 
 const root = document.getElementById('panel');
@@ -50,6 +51,45 @@ function presetTile(preset, onclick, label = 'Текст') {
 
 const bar = (b) => h('div', {}, h('div', { class: 'note' }, b.text), h('div', { class: 'progress' }, h('i', { style: { width: pct(b.progress || 0) } })));
 const icon = (name) => h('span', { 'data-icon': name });
+
+// ---------------------------------------------------------------------------
+//   Наложение: видео и фото поверх видео
+// ---------------------------------------------------------------------------
+export async function importPip() {
+  const res = await S.backend.addMedia(S.project.id, 'video');
+  res.errors?.forEach((e) => toast(e, 'err'));
+  if (!res.items?.length) return;
+  commit((p) => { p.media.push(...res.items); });
+  let last = null;
+  for (const m of res.items) { loadMedia(m.id); last = addPip(m) || last; }
+  render();
+  if (last) emit('close-sheets');   // на телефоне — сразу к кадру: двигать и менять размер пальцами
+}
+
+function pipTab() {
+  const p = S.project;
+  const files = p.media.filter((m) => m.kind !== 'audio');
+  const layers = [...(p.pips || [])].sort((a, b) => a.start - b.start);
+  const nameOf = (id) => p.media.find((m) => m.id === id)?.name || '—';
+  return h('div', {},
+    h('div', { class: 'section' },
+      h('button', { class: 'btn primary wide big', onclick: () => importPip().catch((e) => toast(e.message, 'err')) }, icon('plus'), 'Видео или фото поверх'),
+      h('div', { class: 'note' }, p.clips.length
+        ? 'Встанет с курсора поверх основного видео. В кадре: тяни — двигать, двумя пальцами или за уголки — размер. Можно сколько угодно слоёв одновременно.'
+        : 'Сначала добавь основное видео или фото (вкладка «Медиа») — наложения встают поверх него.')),
+    layers.length ? h('h3', {}, `Слои (${layers.length})`) : null,
+    ...layers.map((x) => h('div', { class: 'media-item' + (S.sel.kind === 'pip' && S.sel.ids.includes(x.id) ? ' on' : '') },
+      h('div', { class: 'mi-info' },
+        h('div', { class: 'mi-name' }, nameOf(x.media)),
+        h('div', { class: 'mi-meta' }, `${fmtTime(x.start)} – ${fmtTime(pipEnd(x))} · слой ${(x.track || 0) + 1}`)),
+      h('button', { class: 'btn', title: 'Выбрать', onclick: () => { seek(x.start + 0.01); select('pip', [x.id]); } }, 'Выбрать'))),
+    files.length && p.clips.length ? h('h3', {}, 'Из файлов проекта') : null,
+    ...(p.clips.length ? files : []).map((m) => h('div', { class: 'media-item' },
+      h('div', { class: 'mi-info' },
+        h('div', { class: 'mi-name' }, m.name),
+        h('div', { class: 'mi-meta' }, m.kind === 'image' ? `фото · ${m.width}×${m.height}` : `${fmtTime(m.duration, false)} · ${m.width}×${m.height}`)),
+      h('button', { class: 'btn', title: 'Поставить поверх видео с курсора', onclick: () => { if (addPip(m)) emit('close-sheets'); render(); } }, icon('layers'), 'Поверх'))));
+}
 
 // ---------------------------------------------------------------------------
 //   Медиа
@@ -600,9 +640,9 @@ function canvasTab() {
 }
 
 // ---------------------------------------------------------------------------
-const TABS = { media: mediaTab, audio: audioTab, text: textTab, subs: subsTab, effects: effectsTab, transitions: transitionsTab, auto: autoTab, canvas: canvasTab,
+const TABS = { media: mediaTab, pip: pipTab, audio: audioTab, text: textTab, subs: subsTab, effects: effectsTab, transitions: transitionsTab, auto: autoTab, canvas: canvasTab,
   tracks: tracksTab, beat: beatTab };
-export const TAB_LIST = [['media', 'film', 'Медиа'], ['audio', 'music', 'Аудио'], ['text', 'type', 'Текст'], ['subs', 'subs', 'Субтитры'],
+export const TAB_LIST = [['media', 'film', 'Медиа'], ['pip', 'layers', 'Наложение'], ['audio', 'music', 'Аудио'], ['text', 'type', 'Текст'], ['subs', 'subs', 'Субтитры'],
   ['effects', 'sparkles', 'Эффекты'], ['transitions', 'transition', 'Переходы'], ['auto', 'wand', 'Авто'], ['canvas', 'canvas', 'Холст']];
 /** Режим «Музыка»: ничего про видео — треки, свой бит, звуки. */
 export const MUSIC_TAB_LIST = [['tracks', 'music', 'Треки'], ['beat', 'beat', 'Бит'], ['audio', 'sparkles', 'Звуки']];
@@ -647,5 +687,5 @@ const softRender = () => { if (!root.contains(document.activeElement) || documen
 on('change', softRender);
 on('media-ready', softRender);
 on('cover-asset', () => { if (tab === 'auto') softRender(); });
-on('selection', () => { if (tab === 'transitions') softRender(); });
+on('selection', () => { if (tab === 'transitions' || tab === 'pip') softRender(); });
 on('jobs', () => { if (tab === 'media') softRender(); });

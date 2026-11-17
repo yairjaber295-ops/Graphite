@@ -4,7 +4,8 @@ import { S, clipsTL } from '../store.js';
 import { clipGain, clipWindow } from './frame.js';
 import { srcOffset, hasCurve } from './speed.js';
 import { duckPoints } from '../smart.js';
-import { adPlacements, adGain } from './ads.js';
+import { adPlacements, adGain as adGainOf } from './ads.js';
+import { pipPlacements, pipGain } from './pips.js';
 import { hasAfx, makeChain, setChain } from './afx.js';
 import { audioLen, audioSpeed, processedBuffer } from './audioproc.js';
 import { censorRegions, automateCensor, addBeeps } from './censor.js';
@@ -92,6 +93,13 @@ export class AudioMixer {
       if (ad.insert || ad.end <= a || ad.start >= b) continue;
       await this.adAudio(ctx, ad, Math.max(a, ad.start) - ad.start, Math.min(b, ad.end) - ad.start, Math.max(0, ad.start - a));
     }
+    // звук наложений (видео поверх видео)
+    if (!this.only) {
+      for (const x of pipPlacements()) {
+        if (x.end <= a || x.start >= b) continue;
+        await this.adAudio(ctx, x, Math.max(a, x.start) - x.start, Math.min(b, x.end) - x.start, Math.max(0, x.start - a));
+      }
+    }
     const solo = (S.project.audio || []).some((it) => it.solo && !it.muted);
     for (const it of S.project.audio || []) {
       const end = it.start + audioLen(it);
@@ -153,10 +161,11 @@ export class AudioMixer {
    * Ускоренный/замедленный ролик — с сохранением тона (как у клипов).
    */
   async adAudio(ctx, x, a0, a1, at) {
-    if (x.kind === 'image' || !(S.project.ads.volume ?? 1) || a1 - a0 <= 1e-4) return;
+    if (x.kind === 'image' || !(x.pip ? x.volume ?? 1 : S.project.ads.volume ?? 1) || a1 - a0 <= 1e-4) return;
     const sink = await this.audioSink(x.media);
     if (!sink) return;
     const sp = x.speed || 1, span = { start: 0, end: x.end - x.start };
+    const adGain = x.pip ? (_, q) => pipGain(x, q) : adGainOf;   // у наложения своя громкость и плавные края
     const off = a0 - at; // время ролика → время в ctx
     if (Math.abs(sp - 1) > 1e-6) {
       const srcA = x.srcIn + a0 * sp, srcB = x.srcIn + a1 * sp, r0 = Math.max(0, srcA - 0.06);
