@@ -73,6 +73,8 @@ jobs:
           open(st, 'w', encoding='utf-8').write(s)
           PY
           python -I "$GITHUB_WORKSPACE/tools/android_icons.py" android/app/src/main/res
+          # один ключ подписи для всех сборок + растущая версия: обновление ставится поверх старого
+          python -I "$GITHUB_WORKSPACE/tools/android_signing.py" android
 
       - name: Сборка APK
         working-directory: ${{ runner.temp }}/proj/android

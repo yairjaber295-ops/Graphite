@@ -74,6 +74,8 @@ if (Test-Path $strings) {
   [IO.File]::WriteAllText((Resolve-Path $strings), $sx, (New-Object System.Text.UTF8Encoding($false)))
 }
 python -I "$Root\tools\android_icons.py" "$P\android\app\src\main\res"
+# один ключ подписи для всех сборок (комп и GitHub) + растущая версия: новая ставится поверх старой
+python -I "$Root\tools\android_signing.py" "$P\android"
 Push-Location android
 Write-Host '⏳ Сборка APK (первый раз Gradle качает зависимости — несколько минут)...'
 .\gradlew.bat assembleDebug --no-daemon
