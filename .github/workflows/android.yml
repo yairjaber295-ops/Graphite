@@ -62,6 +62,8 @@ jobs:
           x = open(man, encoding='utf-8').read()
           if 'usesCleartextTraffic' not in x:      # подключение к компу по http в домашней сети
               x = x.replace('<application', '<application android:usesCleartextTraffic="true"', 1)
+          if 'requestLegacyExternalStorage' not in x:   # Android 10: сохранение видео в «Документы/Graphite»
+              x = x.replace('<application', '<application android:requestLegacyExternalStorage="true"', 1)
           if 'RECORD_AUDIO' not in x:              # запись голоса в проекте «Музыка»
               x = x.replace('<application', '<uses-permission android:name="android.permission.RECORD_AUDIO" />\n    '
                             '<uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />\n    <application', 1)

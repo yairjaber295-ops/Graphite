@@ -63,6 +63,9 @@ npx cap sync android
 $man = 'android\app\src\main\AndroidManifest.xml'
 $x = Get-Content $man -Raw
 if ($x -notmatch 'usesCleartextTraffic') { $x = $x -replace '<application', '<application android:usesCleartextTraffic="true"'; [IO.File]::WriteAllText((Resolve-Path $man), $x) }
+# Android 10: сохранение готовых видео в «Документы/Graphite»
+$x = Get-Content $man -Raw
+if ($x -notmatch 'requestLegacyExternalStorage') { $x = $x -replace '<application', '<application android:requestLegacyExternalStorage="true"'; [IO.File]::WriteAllText((Resolve-Path $man), $x) }
 # микрофон — запись голоса в проекте «Музыка»
 $x = Get-Content $man -Raw
 if ($x -notmatch 'RECORD_AUDIO') { $x = $x -replace '(<application)', "<uses-permission android:name=`"android.permission.RECORD_AUDIO`" />`n    <uses-permission android:name=`"android.permission.MODIFY_AUDIO_SETTINGS`" />`n    `$1"; [IO.File]::WriteAllText((Resolve-Path $man), $x) }

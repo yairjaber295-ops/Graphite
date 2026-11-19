@@ -178,6 +178,19 @@ async function runAudio(box, close, opts) {
   }
 }
 
+/** Строка под именем файла: размер и куда сохранён (на телефоне запись начинается сразу). */
+function savedMeta(r) {
+  const size = `${(r.blob.size / 1048576).toFixed(1)} МБ`;
+  const el = h('div', { class: 'mi-meta' }, size);
+  const p = saveOnPhone(r);
+  if (p) {
+    el.textContent = `${size} · сохраняю…`;
+    p.then((s) => { el.textContent = s?.where ? `${size} · сохранено: ${s.where}` : `${size} · во временной папке`; })
+      .catch((e) => { el.textContent = `${size} · не сохранилось: ${e?.message || e}`; });
+  }
+  return el;
+}
+
 function finish(box, close, results, opts) {
   delete box.dataset.locked;
   const schedule = () => { close(); import('./publish.js').then((m) => m.publishDialog({ project: S.project })); };
@@ -191,10 +204,12 @@ function finish(box, close, results, opts) {
     local
       ? h('div', {}, ...results.map((r) => h('div', { class: 'media-item' },
         h('div', { class: 'mi-thumb' }, h('span', { 'data-icon': /^audio\//.test(r.blob.type) ? 'music' : 'film' })),
-        h('div', { class: 'mi-info' }, h('div', { class: 'mi-name' }, r.name), h('div', { class: 'mi-meta' }, `${(r.blob.size / 1048576).toFixed(1)} МБ`)),
+        h('div', { class: 'mi-info' }, h('div', { class: 'mi-name' }, r.name), savedMeta(r)),
         h('button', { class: 'btn primary', onclick: () => shareFile(r) }, h('span', { 'data-icon': 'share' }), 'Отправить'))))
       : h('div', { class: 'file-list' }, ...results.map((r) => h('div', {}, r.name))),
-    local ? h('div', { class: 'note' }, '«Отправить» → TikTok, «Сохранить видео» в галерею или любое приложение.') : null,
+    local ? h('div', { class: 'note' }, env.native
+      ? 'Видео сохраняется в «Документы/Graphite» (приложение «Файлы»). «Отправить» → TikTok, галерея, Telegram или любое приложение.'
+      : '«Отправить» → TikTok, «Сохранить видео» в галерею или любое приложение.') : null,
     opts.covers.length ? h('h3', { style: { marginTop: '14px' } }, 'Обложки') : null,
     opts.covers.length ? (local
       ? h('div', { class: 'cover-row' }, ...opts.covers.map((c) => h('img', { src: URL.createObjectURL(c.blob), title: c.name, onclick: () => shareFile(c) })))
@@ -210,25 +225,66 @@ function finish(box, close, results, opts) {
   hydrateIcons(box);
 }
 
+const CHUNK = 3 * 1024 * 1024;   // кратно 3 байтам — куски base64 склеиваются без порчи
+const SAVE_DIR = 'Graphite';
+
+const b64Of = (blob) => new Promise((res, rej) => {
+  const fr = new FileReader();
+  fr.onload = () => res(String(fr.result).split(',')[1] || '');
+  fr.onerror = () => rej(fr.error);
+  fr.readAsDataURL(blob);
+});
+
+/** Записать файл на телефон кусками (целиком в одну строку не влезает в память на длинных видео —
+ *  из-за этого приложение и падало на «Отправить»). Возвращает { uri, where }. */
+async function writeChunked(FS, blob, path, directory) {
+  for (let off = 0, first = true; off < blob.size || first; off += CHUNK, first = false) {
+    const data = await b64Of(blob.slice(off, off + CHUNK));
+    if (first) await FS.writeFile({ path, data, directory, recursive: true });
+    else await FS.appendFile({ path, data, directory });
+  }
+  return (await FS.getUri({ path, directory })).uri;
+}
+
+/** Сохранить готовый файл на телефоне: «Документы/Graphite» (видно в «Файлах»), если нельзя — во временную папку.
+ *  Один раз на файл: повторное «Отправить» берёт уже записанный. */
+export function saveOnPhone(r) {
+  const FS = window.Capacitor?.Plugins?.Filesystem;
+  if (!env.native || !FS) return Promise.resolve(null);
+  r.saving ||= (async () => {
+    try {
+      const uri = await writeChunked(FS, r.blob, `${SAVE_DIR}/${r.name}`, 'DOCUMENTS');
+      return { uri, where: `Документы/${SAVE_DIR}` };
+    } catch (e) {
+      console.warn('Документы недоступны, пишу во временную папку', e);
+      const uri = await writeChunked(FS, r.blob, r.name, 'CACHE');
+      return { uri, where: null };
+    }
+  })();
+  r.saving.catch(() => { r.saving = null; });   // при ошибке — можно попробовать ещё раз
+  return r.saving;
+}
+
 /** Сохранить/поделиться готовым видео на телефоне. */
-export async function shareFile({ blob, name }) {
-  const file = new File([blob], name, { type: blob.type || 'video/mp4' });
+export async function shareFile(r) {
+  const { blob, name } = r;
   const Cap = window.Capacitor?.Plugins;
   try {
     if (env.native && Cap?.Filesystem && Cap?.Share) {
-      // Android-приложение: пишем во временную папку и открываем системное «Поделиться»
-      const b64 = await new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1]); fr.readAsDataURL(blob); });
-      const w = await Cap.Filesystem.writeFile({ path: name, data: b64, directory: 'CACHE' });
-      await Cap.Share.share({ title: name, files: [w.uri] });
+      // Android-приложение: файл уже на телефоне — открываем системное «Поделиться» (TikTok, галерея, Telegram…)
+      const saved = await saveOnPhone(r);
+      await Cap.Share.share({ title: name, files: [saved.uri] });
       return;
     }
+    const file = new File([blob], name, { type: blob.type || 'video/mp4' });
     if (navigator.canShare?.({ files: [file] })) {
       await navigator.share({ files: [file], title: name });
       return;
     }
   } catch (e) {
-    if (e?.name === 'AbortError') return;
+    if (e?.name === 'AbortError' || /cancel/i.test(e?.message || '')) return;
     console.warn(e);
+    if (env.native) { toast('Не получилось отправить: ' + (e?.message || e), 'err'); return; }
   }
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
