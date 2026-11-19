@@ -3,7 +3,8 @@
     python -I tools/fetch_vosk.py <папка www> <папка node_modules>
 
 www/vosk/vosk.js        — из npm-пакета vosk-browser (распознавание на WebAssembly)
-www/vosk/model.tar.gz   — vosk-model-small-ru-0.22 (~45 МБ), перепакованная из zip в tar.gz, как ждёт vosk-browser.
+www/vosk/model.vosk     — vosk-model-small-ru-0.22 (~45 МБ), перепакованная из zip в tar.gz, как ждёт vosk-browser.
+                          Не «.tar.gz»: сборщик Android распаковывает такие файлы и убирает «.gz» из имени.
 Модель скачивается один раз и лежит в .cache/vosk (или в GRAPHITE_CACHE).
 """
 import os
@@ -45,7 +46,7 @@ def main(www, node_modules):
             tf.add(os.path.join(unz, MODEL), arcname=MODEL)
         shutil.rmtree(unz, ignore_errors=True)
         os.replace(tmp, tgz)
-    shutil.copyfile(tgz, os.path.join(out, 'model.tar.gz'))
+    shutil.copyfile(tgz, os.path.join(out, 'model.vosk'))
     with open(os.path.join(out, 'ready.json'), 'w', encoding='utf-8') as f:   # метка «офлайн-модель есть»
         f.write('{"model": "%s"}' % MODEL)
     print(f'офлайн-субтитры: vosk.js + {MODEL} ({os.path.getsize(tgz) / 1048576:.0f} МБ)')

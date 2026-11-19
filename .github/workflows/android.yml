@@ -34,7 +34,7 @@ jobs:
 
       - name: Кеш офлайн-модели для субтитров
         uses: actions/cache@v4
-        with: { path: .cache/vosk, key: vosk-model-small-ru-0.22-v1 }
+        with: { path: .cache/vosk, key: vosk-model-small-ru-0.22-v2 }
 
       - name: Python-зависимости для сборки файлов приложения
         run: pip install pillow numpy

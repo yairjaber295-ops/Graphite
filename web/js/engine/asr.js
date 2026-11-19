@@ -163,7 +163,7 @@ export async function checkCloud() {
 // ---------------------------------------------------------------------------
 //   Офлайн: Vosk внутри приложения (vosk/vosk.js + vosk/model.tar.gz кладёт сборка APK)
 // ---------------------------------------------------------------------------
-const VOSK_JS = 'vosk/vosk.js', VOSK_MODEL = 'vosk/model.tar.gz', VOSK_READY = 'vosk/ready.json';
+const VOSK_JS = 'vosk/vosk.js', VOSK_MODEL = 'vosk/model.vosk', VOSK_READY = 'vosk/ready.json';
 let voskModel = null, voskLoading = null, offlineChecked = null;
 
 /** Есть ли офлайн-модель в этой сборке (в APK — есть; в браузере с компа — нет, там Whisper на компе). */
