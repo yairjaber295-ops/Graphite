@@ -1,0 +1,27 @@
+# временная проверка для автосубтитров на телефоне (ветка asr-probe, потом удаляется)
+name: ASR probe
+on: { push: { branches: [asr-probe] } }
+permissions: { contents: write }
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Groq CORS
+        run: |
+          curl -s -X OPTIONS https://api.groq.com/openai/v1/audio/transcriptions -H "Origin: https://localhost" -H "Access-Control-Request-Method: POST" -H "Access-Control-Request-Headers: authorization" -D - -o /dev/null | grep -i "^HTTP\|access-control" || true
+          echo ---; curl -s https://api.groq.com/openai/v1/models -H "Origin: https://localhost" -D - -o /dev/null | grep -i "^HTTP\|access-control" || true
+          echo --- openai; curl -s -X OPTIONS https://api.openai.com/v1/audio/transcriptions -H "Origin: https://localhost" -H "Access-Control-Request-Method: POST" -H "Access-Control-Request-Headers: authorization" -D - -o /dev/null | grep -i "^HTTP\|access-control" || true
+      - name: Модель и тестовая речь
+        run: |
+          mkdir out && cd out
+          curl -sSL -o m.zip https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip
+          ls -la m.zip; unzip -q m.zip; ls vosk-model-small-ru-0.22 vosk-model-small-ru-0.22/*
+          tar czf vosk-model-small-ru.tar.gz vosk-model-small-ru-0.22; ls -la
+          sudo apt-get install -y -qq espeak-ng >/dev/null
+          espeak-ng -v ru -s 140 -w speech.wav "Привет всем, сегодня мы делаем нарезку стрима. Это первая часть, подписывайтесь на канал."
+          ls -la
+      - name: В релиз asr-probe
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          gh release delete asr-probe --cleanup-tag --yes -R "$GITHUB_REPOSITORY" || true
+          gh release create asr-probe out/vosk-model-small-ru.tar.gz out/speech.wav -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title "временно: проверка субтитров" --notes "удалю после проверки"
