@@ -273,7 +273,16 @@ export async function shareFile(r) {
     if (env.native && Cap?.Filesystem && Cap?.Share) {
       // Android-приложение: файл уже на телефоне — открываем системное «Поделиться» (TikTok, галерея, Telegram…)
       const saved = await saveOnPhone(r);
-      await Cap.Share.share({ title: name, files: [saved.uri] });
+      try {
+        await Cap.Share.share({ title: name, files: [saved.uri] });
+      } catch (e) {
+        if (!saved.where || /cancel/i.test(e?.message || '')) throw e;
+        // Samsung «Защищённая папка» (Knox) и другие профили могут не дать поделиться файлом из «Документов» —
+        // тогда отдаём копию из внутренней временной папки приложения
+        console.warn('share из Документов не вышел, пробую временную папку', e);
+        r.cacheUri ||= await writeChunked(Cap.Filesystem, blob, name, 'CACHE');
+        await Cap.Share.share({ title: name, files: [r.cacheUri] });
+      }
       return;
     }
     const file = new File([blob], name, { type: blob.type || 'video/mp4' });
