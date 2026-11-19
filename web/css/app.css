@@ -262,7 +262,7 @@ body.mobile #btn-schedule .lbl { display: none; }
 .row { display: flex; gap: 8px; align-items: center; }
 .row > * { flex: 1; min-width: 0; }
 .row > .fixed { flex: none; }
-input[type=text], input[type=number], input[type=url], textarea, select {
+input[type=text], input[type=password], input[type=number], input[type=url], textarea, select {
   width: 100%; background: var(--surface-2); border: 1px solid var(--line-2); border-radius: var(--r-sm); padding: 8px 10px;
   outline: none; user-select: text; -webkit-user-select: text; transition: border-color .15s; }
 input:focus, textarea:focus, select:focus { border-color: var(--accent); }

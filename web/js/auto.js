@@ -269,8 +269,9 @@ export function splitIntoParts() {
 export async function doEverything(onStatus) {
   if (!S.project.clips.length) throw new Error('Сначала добавь видео на таймлайн');
   let fresh = false;
-  // без компа (телефон сам по себе) субтитры пропускаем — части режутся по паузам в звуке
-  if (!subs().length && (S.backend.caps.transcribe || !missingWords().length)) {
+  // нечем распознавать (телефон без компа, ключа и офлайн-модели) — субтитры пропускаем, части режутся по паузам
+  const canAsr = S.backend.caps.transcribe && (!S.backend.asrEngine || !!(await S.backend.asrEngine()));
+  if (!subs().length && (canAsr || !missingWords().length)) {
     if (missingWords().length) {
       onStatus('Распознаю речь…', 0);
       await transcribeAll((j) => onStatus(j.message || 'Распознаю речь…', j.progress));

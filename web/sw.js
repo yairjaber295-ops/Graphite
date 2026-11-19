@@ -1,6 +1,6 @@
 // Офлайн-кэш приложения: на телефоне редактор открывается и без компа.
 // Стратегия «сначала сеть»: если комп доступен — всегда свежая версия, иначе — из кэша.
-const CACHE = 'narezchik-v38';
+const CACHE = 'narezchik-v39';
 
 self.addEventListener('install', (e) => {
   e.waitUntil((async () => {
@@ -25,7 +25,7 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;
   // данные проектов и видео не кэшируем — только само приложение
-  if (/^\/(api|files|source)\//.test(url.pathname) || e.request.headers.has('range')) return;
+  if (/^\/(api|files|source|vosk)\//.test(url.pathname) || e.request.headers.has('range')) return;
   e.respondWith((async () => {
     try {
       const res = await fetch(e.request);

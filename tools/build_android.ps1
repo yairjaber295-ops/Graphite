@@ -44,7 +44,7 @@ if (-not (Test-Path 'package.json')) {
   '{ "name": "narezchik", "version": "2.0.0", "private": true }' | Out-File -Encoding ascii package.json
 }
 Write-Host '⏳ Ставлю Capacitor...'
-npm install --no-audit --no-fund @capacitor/core@8.5.3 @capacitor/cli@8.5.3 @capacitor/android@8.5.3 @capacitor/filesystem@8.1.4 @capacitor/share@8.0.3
+npm install --no-audit --no-fund @capacitor/core@8.5.3 @capacitor/cli@8.5.3 @capacitor/android@8.5.3 @capacitor/filesystem@8.1.4 @capacitor/share@8.0.3 vosk-browser@0.0.8
 $cfg = @'
 {
   "appId": "ru.narezchik.app",
@@ -57,6 +57,8 @@ $cfg = @'
 [IO.File]::WriteAllText("$P\capacitor.config.json", $cfg, (New-Object System.Text.UTF8Encoding($false)))  # JSON без BOM
 Write-Host '⏳ Собираю файлы приложения...'
 python -I "$Root\tools\build_www.py" "$P\www"
+# офлайн-субтитры: Vosk + маленькая русская модель (~45 МБ, качается один раз)
+python -I "$Root\tools\fetch_vosk.py" "$P\www" "$P\node_modules"
 if (-not (Test-Path 'android')) { npx cap add android }
 npx cap sync android
 # подключение к компу по http в домашней сети

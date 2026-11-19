@@ -32,6 +32,10 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
 
+      - name: Кеш офлайн-модели для субтитров
+        uses: actions/cache@v4
+        with: { path: .cache/vosk, key: vosk-model-small-ru-0.22-v1 }
+
       - name: Python-зависимости для сборки файлов приложения
         run: pip install pillow numpy
 
@@ -39,7 +43,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/proj" && cd "$RUNNER_TEMP/proj"
           echo '{ "name": "narezchik", "version": "2.0.0", "private": true }' > package.json
-          npm install --no-audit --no-fund @capacitor/core@8.5.3 @capacitor/cli@8.5.3 @capacitor/android@8.5.3 @capacitor/filesystem@8.1.4 @capacitor/share@8.0.3
+          npm install --no-audit --no-fund @capacitor/core@8.5.3 @capacitor/cli@8.5.3 @capacitor/android@8.5.3 @capacitor/filesystem@8.1.4 @capacitor/share@8.0.3 vosk-browser@0.0.8
           cat > capacitor.config.json <<'JSON'
           {
             "appId": "ru.narezchik.app",
@@ -50,6 +54,8 @@ jobs:
           }
           JSON
           python -I "$GITHUB_WORKSPACE/tools/build_www.py" "$RUNNER_TEMP/proj/www"
+          # офлайн-субтитры: Vosk + маленькая русская модель (~45 МБ)
+          python -I "$GITHUB_WORKSPACE/tools/fetch_vosk.py" "$RUNNER_TEMP/proj/www" "$RUNNER_TEMP/proj/node_modules"
           npx cap add android
           npx cap sync android
 

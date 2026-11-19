@@ -19,6 +19,8 @@ import { autoEdit } from './autoedit.js';
 import { allProfiles, presetsOf, applyProfile, deleteCustom, defaultProfile, setDefaultProfile } from './profiles.js';
 import { presetEditor } from './presetui.js';
 import { projectOverlays } from './overlays.js';
+import { ASR_PROVIDERS, asrSettings, saveAsrSettings, cloudReady, checkCloud, offlineAvailable } from './engine/asr.js';
+import { env } from './backend/index.js';
 import { adsSection } from './adsui.js';
 import { COVER_STYLES, drawCover, makeAvatar } from './engine/covers.js';
 import { coverInfo } from './engine/frame.js';
@@ -249,6 +251,55 @@ function applyOrAdd(style, text) {
 // ---------------------------------------------------------------------------
 //   Субтитры
 // ---------------------------------------------------------------------------
+/** Открыть сайт во внешнем браузере (в приложении переход на чужой сайт Android сам отдаёт браузеру). */
+function openExternal(url) {
+  if (env.native) location.href = url;
+  else window.open(url, '_blank', 'noopener');
+}
+
+/** Телефон: чем распознавать речь — комп, облако (свой ключ Groq/OpenAI/любой совместимый) или офлайн на телефоне. */
+function asrSection() {
+  const s = asrSettings();
+  const pc = !!S.backend.pc;
+  const set = (patch, rerender = true) => { saveAsrSettings(patch); if (rerender) render(); };
+  const status = h('div', { class: 'note' }, '…');
+  const offNote = h('span', {});
+  offlineAvailable().then((ok) => {
+    offNote.textContent = ok ? '' : ' (нет в этой версии — только в приложении для Android)';
+    const cur = s.engine === 'auto' ? (pc ? 'комп' : cloudReady(s) ? 'облако' : ok ? 'офлайн на телефоне' : null) : null;
+    status.textContent = s.engine === 'auto'
+      ? (cur ? `Сейчас будет: ${cur}.` : 'Нечем распознавать: вставь ключ ниже или подключи комп.')
+      : s.engine === 'pc' && !pc ? 'Комп не подключён — главный экран → «Комп».'
+        : s.engine === 'cloud' && !cloudReady(s) ? 'Вставь ключ ниже.'
+          : s.engine === 'offline' && !ok ? 'В этой версии нет офлайн-модели.' : '';
+    status.className = 'note' + (status.textContent.startsWith('Нечем') || /не подключён|Вставь|нет офлайн/.test(status.textContent) ? ' warn' : '');
+  });
+  const prov = ASR_PROVIDERS[s.provider] || ASR_PROVIDERS.groq;
+  const checkOut = h('div', { class: 'note' });
+  const showCloud = s.engine === 'cloud' || s.engine === 'auto';
+  return h('div', { class: 'section asr-box' },
+    h('h4', {}, 'Как распознавать'),
+    seg({ auto: 'Авто', cloud: 'Облако', offline: 'На телефоне', ...(pc || s.engine === 'pc' ? { pc: 'Комп' } : {}) }, s.engine, (v) => set({ engine: v })),
+    h('div', { class: 'note' },
+      s.engine === 'offline' ? h('span', {}, 'Без интернета, считает сам телефон (Vosk, только русский). Быстро и бесплатно, но точность ниже облака — особенно на сленге и быстрой речи.', offNote)
+        : s.engine === 'pc' ? 'Whisper на видеокарте компа, звук уходит по Wi-Fi.'
+          : s.engine === 'cloud' ? 'Звук уходит в сервис со своим ключом — распознаёт Whisper, телефон почти не нагружается. Нужен интернет (из России — с VPN).'
+            : h('span', {}, 'Комп, если подключён → облако, если вставлен ключ → иначе на телефоне без интернета.', offNote)),
+    status,
+    showCloud ? h('div', { class: 'asr-cloud' },
+      field('Сервис', sel(Object.fromEntries(Object.entries(ASR_PROVIDERS).map(([k, v]) => [k, v.label])), s.provider, (v) => set({ provider: v }))),
+      s.provider === 'custom' ? field('Адрес API (до /audio/transcriptions)', textInput(s.base, (v) => set({ base: v.trim() }, false), { placeholder: 'https://…/v1', inputmode: 'url' })) : null,
+      s.provider === 'custom' ? field('Модель', textInput(s.model, (v) => set({ model: v.trim() }, false), { placeholder: 'whisper-1' })) : null,
+      field('API-ключ', textInput(s.key, (v) => set({ key: v.trim() }, false), { type: 'password', placeholder: s.provider === 'groq' ? 'gsk_…' : s.provider === 'openai' ? 'sk-…' : 'ключ', autocomplete: 'off' })),
+      h('div', { class: 'btn-row' },
+        h('button', { class: 'btn', onclick: async () => { checkOut.textContent = 'Проверяю…'; checkOut.className = 'note'; const r = await checkCloud(); checkOut.textContent = r.text; checkOut.className = 'note' + (r.ok ? ' ok' : ' warn'); } }, 'Проверить ключ'),
+        prov.keyUrl ? h('button', { class: 'btn', onclick: () => openExternal(prov.keyUrl) }, 'Получить ключ') : null,
+        s.key ? h('button', { class: 'btn', onclick: () => set({ key: '' }) }, 'Убрать ключ') : null),
+      checkOut,
+      s.provider === 'groq' ? h('div', { class: 'note' }, 'Ключ Groq бесплатный: «Получить ключ» → войти через Google → Create API Key → скопировать и вставить сюда. Бесплатно — до 8 часов звука в день. Ключ хранится только на этом телефоне.')
+        : h('div', { class: 'note' }, 'Ключ хранится только на этом телефоне и уходит только в выбранный сервис.')) : null);
+}
+
 function subsTab() {
   const p = S.project;
   const o = p.subs.opts;
@@ -270,7 +321,7 @@ function subsTab() {
   };
   return h('div', {},
     h('h3', {}, 'Автосубтитры'),
-    canDo ? h('div', { class: 'note' }, S.backend.kind === 'local'
+    S.backend.caps.asr ? asrSection() : canDo ? h('div', { class: 'note' }, S.backend.kind === 'local'
       ? 'Речь распознаёт твой комп (Whisper на видеокарте): звук уходит на него по Wi-Fi.'
       : 'Речь распознаётся на видеокарте компа (Whisper), без интернета и подписок. Субтитры — обычный текст.')
       : h('div', { class: 'note warn' }, 'На телефоне без компа автосубтитров нет. Подключи комп: главный экран → «Комп». Текст можно добавить вручную.'),
@@ -468,7 +519,7 @@ function cutMode() {
       busy ? bar(busy) : h('button', { class: 'btn primary wide big', onclick: doAll, disabled: !p.clips.length }, icon('wand'), 'Сделать всё автоматически'),
       h('div', { class: 'note' }, S.backend.caps.transcribe
         ? 'Субтитры (если ещё нет) → части на концах предложений → заголовки «часть N / финал» → обложки.'
-        : 'Без компа: части по паузам в звуке → заголовки → обложки (субтитры — когда подключишь комп).')),
+        : 'Без компа: части по паузам в звуке → заголовки → обложки.')),
     field('Название серии', textInput(p.title, (v) => commit((q) => { q.title = v; }, 'title'), { placeholder: p.name })),
     h('h3', { style: { marginTop: '16px' } }, 'Пресет'),
     presetGrid('cut', p.profile, (k, pr) => {

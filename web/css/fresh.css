@@ -39,7 +39,7 @@ body::before {
 .chip { background: var(--glass); backdrop-filter: blur(10px); padding: 6px 13px 6px 10px; font-weight: 600; }
 .chip:hover { border-color: color-mix(in srgb, var(--accent) 55%, transparent); transform: translateY(-1px); }
 .chip.accent { background: color-mix(in srgb, var(--accent) 16%, var(--surface-2)); border-color: color-mix(in srgb, var(--accent) 45%, transparent); color: var(--accent-text); }
-input[type=text], input[type=number], input[type=url], input[type=search], textarea, select { border-radius: var(--r-sm); background: var(--surface-2); }
+input[type=text], input[type=password], input[type=number], input[type=url], input[type=search], textarea, select { border-radius: var(--r-sm); background: var(--surface-2); }
 input:focus, textarea:focus, select:focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
 .seg { border-radius: 999px; padding: 3px; background: var(--surface-2); }
 .seg button { border-radius: 999px; padding: 7px 8px; font-weight: 600; }
@@ -242,3 +242,5 @@ body.mobile .ctx-sheet .has-sub:hover > .ctx-sub { display: none; }      /* на
 body.mobile .ctx-sheet .has-sub.open > .ctx-sub { display: block; }
 body.mobile .ctx-sheet .ctx-item:hover:not(.open) { background: transparent; }
 body.mobile .ctx-sheet .ctx-hint { display: none; }
+.asr-box .asr-cloud input { width: 100%; }
+.asr-box .note.ok { color: var(--ok, #3ddc97); }

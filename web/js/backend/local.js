@@ -3,6 +3,7 @@
 import * as MB from 'mediabunny';
 import { pickFiles } from './server.js';
 import { clipDur } from '../engine/speed.js';
+import { asrSettings, cloudReady, cloudTranscribe, offlineTranscribe, offlineAvailable } from '../engine/asr.js';
 
 const DB_NAME = 'narezchik', DB_VER = 1;
 let dbp = null;
@@ -47,7 +48,7 @@ export class LocalBackend {
   constructor(pcLink = null) {
     this.kind = 'local';
     this.pc = pcLink; // ServerBackend компа по Wi-Fi (для субтитров), если подключён
-    this.caps = { transcribe: !!pcLink, proxies: false, saveToDisk: false, uploader: false, openFolder: false, pickPaths: false, enhance: !!pcLink };
+    this.caps = { transcribe: true, asr: true, proxies: false, saveToDisk: false, uploader: false, openFolder: false, pickPaths: false, enhance: !!pcLink };
     this.urls = {};
     this.xfiles = {};
     this.proxying = {}; this.proxyProgress = {}; this.proxyChain = Promise.resolve();   // файлы, уже отправленные на комп для улучшения: `${pid}/${mid}` → id на компе
@@ -377,14 +378,36 @@ export class LocalBackend {
     return f ? ctx.decodeAudioData(await f.arrayBuffer()) : null;
   }
 
-  /** Субтитры: звук 16 кГц отправляется на комп (Whisper работает там). */
+  /** Какой способ распознавания будет использован: pc | cloud | offline | null (нечем). */
+  async asrEngine() {
+    const s = asrSettings();
+    if (s.engine === 'pc') return this.pc ? 'pc' : null;
+    if (s.engine === 'cloud') return cloudReady(s) ? 'cloud' : null;
+    if (s.engine === 'offline') return (await offlineAvailable()) ? 'offline' : null;
+    // авто: комп (если подключён) → облако (если есть ключ) → офлайн-модель
+    if (this.pc) return 'pc';
+    if (cloudReady(s)) return 'cloud';
+    return (await offlineAvailable()) ? 'offline' : null;
+  }
+
+  /** Субтитры: звук 16 кГц → комп (Whisper), облако (Groq/OpenAI) или офлайн-модель на телефоне. */
   async transcribe(pid, m, opts, onProgress) {
-    if (!this.pc) throw new Error('Для субтитров подключись к компу (кнопка «Комп» на главном экране)');
+    const engine = await this.asrEngine();
+    if (!engine) {
+      const s = asrSettings();
+      throw new Error(s.engine === 'pc' ? 'Комп не подключён (главный экран → «Комп»)'
+        : s.engine === 'cloud' ? 'Вставь API-ключ в «Субтитры» → «Как распознавать»'
+          : 'Нечем распознавать: вставь ключ Groq или подключи комп («Субтитры» → «Как распознавать»)');
+    }
     onProgress?.({ message: 'Готовлю звук…', progress: 0.01 });
     const f = await this.file(pid, m.id);
     const pcm = await pcm16k(f);
-    onProgress?.({ message: 'Отправляю звук на комп…', progress: 0.03 });
-    const res = await this.pc.transcribePcm(pcm, opts, onProgress);
+    let res;
+    if (engine === 'pc') {
+      onProgress?.({ message: 'Отправляю звук на комп…', progress: 0.03 });
+      res = await this.pc.transcribePcm(pcm, opts, onProgress);
+    } else if (engine === 'cloud') res = await cloudTranscribe(pcm, opts, onProgress);
+    else res = await offlineTranscribe(pcm, opts, onProgress);
     const key = `${pid}/${m.id}`;
     const meta = (await get('media', key)) || {};
     meta.words = res;
